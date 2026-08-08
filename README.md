@@ -28,7 +28,7 @@ self-contained file under `nrdlsim/`:
 | `tbs.py` | Transport block size (≤3824-bit quantisation table + >3824 formula) | TS 38.214 §5.1.3.2 |
 | `resource_grid.py` | **Resource grid** + **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
 | `modulation.py` | QPSK/16/64/256-QAM Gray mapping and max-log **soft (LLR) demapping** | TS 38.211 §5.1 |
-| `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, ULA steering vectors, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.7.1–7.7.2 |
+| `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
 | `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
 | `ldpc.py` | **DL-SCH coding**: CRC (24A/24B/16), code-block segmentation, base-graph (BG1/BG2) selection, QC-LDPC encode, normalised min-sum decode, rate matching | TS 38.212 §5, §7.2 |
 | `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression, NR-LDPC BLER model | — |
@@ -95,6 +95,10 @@ python run_simulation.py --model AWGN --ntx 1 --nrx 1
 python run_simulation.py --model CDL-C --ds 300 --plot
 python run_simulation.py --model CDL-D --doppler 50    # LOS profile
 
+# CDL with a dual-polarized UPA: 8 tx ports = 2x2 positions x 2 pol, rank 4
+python run_simulation.py --model CDL-C --ntx 8 --nrx 4 \
+    --tx-pol 2 --rx-pol 2 --tx-layout 2x2 --rx-layout 1x2 --layers 4
+
 # Fixed MCS (no link adaptation), higher Doppler
 python run_simulation.py --fixed-mcs --mcs 20 --doppler 300
 
@@ -115,6 +119,9 @@ python examples/compare_configs.py
 | `--model` | `TDL-A…E`, `CDL-A…E` or `AWGN` | TDL-C |
 | `--ds / --doppler` | delay spread (ns) / max Doppler (Hz) | 100 / 100 |
 | `--mcs-table` | 1 (64QAM), 2 (256QAM), 3 (low-SE) | 2 |
+| `--tx-pol / --rx-pol` | CDL polarizations per position (1, or 2 for cross-polar ±45°) | 1 |
+| `--tx-layout / --rx-layout` | CDL panel `VxH` position grid (e.g. `2x2`); UPA when V>1 | auto (1×N) |
+| `--spacing-v / --spacing-h` | CDL element spacing (wavelengths) | 0.5 |
 | `--snr` | START STOP STEP (dB) | −5 30 2.5 |
 | `--slots` | slots simulated per SNR point | 200 |
 | `--csi-delay` | CSI report delay (slots) | 4 |
@@ -162,13 +169,18 @@ coding gain.
 * The MIMO TDL construction is the **correlation-based** extension of the
   SISO TDL models (Kronecker spatial correlation on i.i.d. per-tap fading),
   matching how TDL is applied to multi-antenna links.
-* The **CDL** models synthesise the MIMO channel from the geometric cluster
-  angles via uniform-linear-array (0.5λ) steering vectors, so they carry the
-  true angular/spatial structure (beamforming gain, spatial correlation) rather
-  than a correlation surrogate. CDL-D/E include the Ricean specular LOS path.
-  Ray angles use the Table 7.5-3 offsets scaled by the per-cluster spreads with
-  random AoA/ZoA ray coupling; a single polarisation is modelled (XPR values are
-  tabulated but polarisation combining is not applied).
+* The **CDL** models synthesise the MIMO channel geometrically from the cluster
+  angles, so they carry the true angular/spatial structure (beamforming gain,
+  spatial correlation) rather than a correlation surrogate. Antennas are modelled
+  as **uniform planar array (UPA) panels** (TR 38.901 §7.3): the panel is a
+  `rows × cols` grid of element positions, each carrying one or two
+  (cross-polar ±45°) polarizations, with configurable element spacing. The
+  per-ray channel uses the full **dual-polarized coefficient** of eq. 7.5-22 —
+  a 2×2 polarization coupling matrix with the model's XPR (cross-polar ratio)
+  and independent random phases — plus location phases from the element
+  positions. CDL-D/E add the deterministic Ricean specular LOS path (eq. 7.5-29).
+  A scalar normalisation makes the average per-port power unity so the SNR sweep
+  is comparable across array/polarization configurations.
 * Channel estimation, PMI selection and CQI use ideal-CSI SVD beamforming as a
   practical proxy for the Type-I codebook; DM-RS estimation error is modelled.
 * The `miesm` link abstraction is the standard methodology for producing SE

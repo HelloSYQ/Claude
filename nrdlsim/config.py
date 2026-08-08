@@ -91,11 +91,27 @@ class PDSCHConfig:
 
 @dataclass
 class AntennaConfig:
-    """MIMO antenna configuration."""
+    """MIMO antenna configuration.
 
-    n_tx: int = 4                       # gNB transmit antennas
-    n_rx: int = 2                       # UE receive antennas
-    correlation: str = "low"            # low / medium / high (TS 36.101 style)
+    For the geometric CDL models the arrays are modelled as uniform planar
+    panels (TR 38.901 clause 7.3): ``tx_layout``/``rx_layout`` give the
+    (rows, cols) grid of element *positions* and ``tx_pol``/``rx_pol`` the number
+    of polarizations per position (1 = single, 2 = cross-polar +/-45 deg).  The
+    total port count must satisfy n = rows * cols * pol.  When a layout is left
+    as ``None`` it defaults to a single-row horizontal array of n/pol positions.
+    """
+
+    n_tx: int = 4                       # gNB transmit antennas (ports)
+    n_rx: int = 2                       # UE receive antennas (ports)
+    correlation: str = "low"            # TDL Kronecker correlation (36.101 style)
+
+    # Geometric panel parameters (used by the CDL models)
+    tx_pol: int = 1                     # polarizations per tx position (1 or 2)
+    rx_pol: int = 1                     # polarizations per rx position (1 or 2)
+    tx_layout: Optional[tuple] = None   # (rows, cols) of tx element positions
+    rx_layout: Optional[tuple] = None   # (rows, cols) of rx element positions
+    spacing_v: float = 0.5              # vertical element spacing (wavelengths)
+    spacing_h: float = 0.5              # horizontal element spacing (wavelengths)
 
 
 @dataclass

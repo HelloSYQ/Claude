@@ -20,13 +20,25 @@ from nrdlsim.config import (SimConfig, CarrierConfig, PDSCHConfig,
 from nrdlsim.link_simulator import NRDownlinkSimulator
 
 
+def _parse_layout(s):
+    """Parse a 'VxH' array layout string (e.g. '2x2') into a (rows, cols) tuple."""
+    if not s:
+        return None
+    v, h = s.lower().split("x")
+    return (int(v), int(h))
+
+
 def build_config(args) -> SimConfig:
     carrier = CarrierConfig(mu=args.mu, n_size_grid=args.rb)
     pdsch = PDSCHConfig(num_rb=args.rb, num_layers=args.layers,
                         mcs_index=args.mcs, mcs_table=args.mcs_table,
                         num_symbols=args.symbols)
     antenna = AntennaConfig(n_tx=args.ntx, n_rx=args.nrx,
-                            correlation=args.correlation)
+                            correlation=args.correlation,
+                            tx_pol=args.tx_pol, rx_pol=args.rx_pol,
+                            tx_layout=_parse_layout(args.tx_layout),
+                            rx_layout=_parse_layout(args.rx_layout),
+                            spacing_v=args.spacing_v, spacing_h=args.spacing_h)
     channel = ChannelConfig(model=args.model, delay_spread_ns=args.ds,
                             max_doppler_hz=args.doppler,
                             carrier_freq_hz=args.fc)
@@ -54,7 +66,20 @@ def main():
     p.add_argument("--ntx", type=int, default=4, help="gNB tx antennas")
     p.add_argument("--nrx", type=int, default=2, help="UE rx antennas")
     p.add_argument("--correlation", default="low",
-                   choices=["low", "medium", "high"])
+                   choices=["low", "medium", "high"],
+                   help="TDL antenna correlation")
+    p.add_argument("--tx-pol", type=int, default=1, choices=[1, 2],
+                   help="CDL: tx polarizations per position (2 = cross-polar)")
+    p.add_argument("--rx-pol", type=int, default=1, choices=[1, 2],
+                   help="CDL: rx polarizations per position")
+    p.add_argument("--tx-layout", default=None,
+                   help="CDL: tx panel 'VxH' element-position grid, e.g. 2x2")
+    p.add_argument("--rx-layout", default=None,
+                   help="CDL: rx panel 'VxH' element-position grid")
+    p.add_argument("--spacing-v", type=float, default=0.5,
+                   help="CDL: vertical element spacing (wavelengths)")
+    p.add_argument("--spacing-h", type=float, default=0.5,
+                   help="CDL: horizontal element spacing (wavelengths)")
     p.add_argument("--model", default="TDL-C",
                    help="channel model: TDL-A..E, CDL-A..E or AWGN")
     p.add_argument("--ds", type=float, default=100.0, help="delay spread (ns)")

@@ -61,12 +61,16 @@ class NRDownlinkSimulator:
         if model.upper() == "AWGN":
             return None, rng
         if model.upper().startswith("CDL"):
+            a = c.antenna
             chan = CDLChannel(
                 model=model,
                 delay_spread_ns=c.channel.delay_spread_ns,
                 max_doppler_hz=c.channel.max_doppler_hz,
-                n_tx=c.antenna.n_tx, n_rx=c.antenna.n_rx,
+                n_tx=a.n_tx, n_rx=a.n_rx,
                 carrier_freq_hz=c.channel.carrier_freq_hz,
+                tx_pol=a.tx_pol, rx_pol=a.rx_pol,
+                tx_layout=a.tx_layout, rx_layout=a.rx_layout,
+                spacing_v=a.spacing_v, spacing_h=a.spacing_h,
                 rng=rng)
             return chan, rng
         chan = TDLChannel(

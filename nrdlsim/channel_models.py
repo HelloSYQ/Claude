@@ -319,24 +319,8 @@ _CDL = {
 }
 
 
-def _ula_steering(n_ant: int, az_deg: np.ndarray, zen_deg: np.ndarray,
-                  spacing: float = 0.5) -> np.ndarray:
-    """Uniform linear array (horizontal) steering vectors.
-
-    Returns array of shape (..., n_ant) giving the per-element phase response
-    exp(j 2*pi d k sin(zenith) cos(azimuth)) for a horizontal ULA along x.
-    Zenith still modulates the effective aperture; it also drives Doppler.
-    """
-    az = np.deg2rad(az_deg)
-    zen = np.deg2rad(zen_deg)
-    # directional cosine along the array axis (x): sin(theta)*cos(phi)
-    u = np.sin(zen) * np.cos(az)
-    k = np.arange(n_ant)
-    phase = 2 * np.pi * spacing * np.multiply.outer(u, k)   # (..., n_ant)
-    return np.exp(1j * phase)
-
-
 def _dir_cosines(az_deg, zen_deg):
+    """Cartesian unit vector(s) for spherical azimuth/zenith angles (deg)."""
     az = np.deg2rad(az_deg)
     zen = np.deg2rad(zen_deg)
     return np.stack([np.sin(zen) * np.cos(az),
@@ -344,21 +328,73 @@ def _dir_cosines(az_deg, zen_deg):
                      np.cos(zen)], axis=-1)
 
 
-class CDLChannel:
-    """Time-varying MIMO CDL channel (TR 38.901 clause 7.7.1).
+def build_panel(n_ant: int, pol: int, layout, spacing_v: float,
+                spacing_h: float):
+    """Uniform planar antenna panel (TR 38.901 clause 7.3).
 
-    The channel for each cluster is the sum of ``rays_per_cluster`` sub-rays
-    whose angles are the cluster mean plus the Table 7.5-3 offsets scaled by the
-    per-cluster angle spreads.  Each ray contributes an outer product of the
-    receive- and transmit-array steering vectors, a random initial phase, and a
-    Doppler term set by the ray's arrival direction and the UE velocity.
+    Returns (positions, slant) where ``positions`` are element locations in
+    wavelengths in the y-z plane, shape (n_ant, 3), and ``slant`` are the
+    polarization slant angles (rad).  Dual-polar positions carry co-located
+    +/-45 deg elements.  Port order iterates positions (row-major) then
+    polarization.
+    """
+    if pol not in (1, 2):
+        raise ValueError("pol must be 1 or 2")
+    if layout is None:
+        n_pos = n_ant // pol
+        layout = (1, n_pos)
+    n_v, n_h = layout
+    if n_v * n_h * pol != n_ant:
+        raise ValueError(
+            f"layout {layout} x pol {pol} != n_ant {n_ant}")
+    slants = np.deg2rad([45.0, -45.0]) if pol == 2 else np.array([0.0])
+    positions = []
+    slant = []
+    for r in range(n_v):
+        for c in range(n_h):
+            for p in range(pol):
+                positions.append([0.0, c * spacing_h, r * spacing_v])
+                slant.append(slants[p])
+    return np.array(positions), np.array(slant)
+
+
+def _location_phase(positions: np.ndarray, az_deg: np.ndarray,
+                    zen_deg: np.ndarray) -> np.ndarray:
+    """Per-element location phase exp(j 2*pi position . r_hat).
+
+    positions: (n_ant, 3); az/zen: (...); returns (..., n_ant).
+    """
+    r_hat = _dir_cosines(az_deg, zen_deg)                    # (..., 3)
+    proj = np.tensordot(r_hat, positions, axes=([-1], [1]))  # (..., n_ant)
+    return np.exp(1j * 2 * np.pi * proj)
+
+
+class CDLChannel:
+    """Time-varying dual-polarized MIMO CDL channel (TR 38.901 7.5 / 7.7.1).
+
+    Each cluster is a sum of 20 sub-rays whose angles are the cluster mean plus
+    the Table 7.5-3 offsets scaled by the per-cluster angle spreads.  The
+    per-ray channel between transmit port s and receive port u follows the
+    polarized coefficient of eq. 7.5-22:
+
+        h_{u,s} = F_rx(u)^T  [[ e^{jΦθθ},      √(1/κ) e^{jΦθφ} ],
+                              [ √(1/κ) e^{jΦφθ}, e^{jΦφφ}      ]]  F_tx(s)
+                  * e^{j2π p_rx(u)·r_rx} * e^{j2π p_tx(s)·r_tx} * e^{j2π ν t}
+
+    where F(.) = [cos ζ, sin ζ] is the element polarization field for slant ζ,
+    κ is the cross-polar ratio (XPR), and p(.) are the panel element positions.
+    LOS models add the deterministic specular term of eq. 7.5-29 with the
+    [[1,0],[0,-1]] co-polar matrix.  A scalar normalisation makes the average
+    per-port power unity so the SNR sweep is comparable across array configs.
     """
 
     RAYS = 20
 
     def __init__(self, model: str, delay_spread_ns: float, max_doppler_hz: float,
                  n_tx: int, n_rx: int, carrier_freq_hz: float = 3.5e9,
-                 tx_spacing: float = 0.5, rx_spacing: float = 0.5,
+                 tx_pol: int = 1, rx_pol: int = 1,
+                 tx_layout=None, rx_layout=None,
+                 spacing_v: float = 0.5, spacing_h: float = 0.5,
                  travel_az_deg: float = 0.0, travel_zen_deg: float = 90.0,
                  rng=None):
         if model not in _CDL:
@@ -367,8 +403,6 @@ class CDLChannel:
         self.n_tx = n_tx
         self.n_rx = n_rx
         self.fd = max_doppler_hz
-        self.tx_spacing = tx_spacing
-        self.rx_spacing = rx_spacing
         self.rng = rng or np.random.default_rng()
 
         spec = _CDL[model]
@@ -376,6 +410,7 @@ class CDLChannel:
         self.delays_s = clusters[:, 0] * delay_spread_ns * 1e-9
         powers_lin = 10 ** (clusters[:, 1] / 10.0)
         c_asd, c_asa, c_zsd, c_zsa = spec["spread"]
+        self.kappa = 10 ** (spec["xpr_db"] / 10.0)           # XPR (linear)
 
         n_clu = len(clusters)
         self.n_clu = n_clu
@@ -387,16 +422,15 @@ class CDLChannel:
                            for _ in range(n_clu)])
         perm_z = np.array([self.rng.permutation(self.RAYS)
                            for _ in range(n_clu)])
-        aoa_base = clusters[:, 3][:, None] + c_asa * _RAY_OFFSETS[None, :]
-        zoa_base = clusters[:, 5][:, None] + c_zsa * _RAY_OFFSETS[None, :]
-        self.aoa = np.take_along_axis(aoa_base, perm_a, axis=1)
-        self.zoa = np.take_along_axis(zoa_base, perm_z, axis=1)
+        self.aoa = np.take_along_axis(
+            clusters[:, 3][:, None] + c_asa * _RAY_OFFSETS[None, :], perm_a, 1)
+        self.zoa = np.take_along_axis(
+            clusters[:, 5][:, None] + c_zsa * _RAY_OFFSETS[None, :], perm_z, 1)
 
         # LOS specular path (Ricean K) for CDL-D/E
         self.has_los = "los_power_db" in spec
         if self.has_los:
             p_los = 10 ** (spec["los_power_db"] / 10.0)
-            # Ricean scaling: normalise so specular + diffuse total power = 1
             total = p_los + powers_lin.sum()
             self.p_los = p_los / total
             powers_lin = powers_lin / total
@@ -405,44 +439,71 @@ class CDLChannel:
             powers_lin = powers_lin / powers_lin.sum()
         self.powers = powers_lin
 
-        # random initial phases per ray
-        self.phase0 = self.rng.uniform(-np.pi, np.pi, size=(n_clu, self.RAYS))
+        # --- antenna panels (positions in wavelengths + polarization slants) ---
+        self.pos_tx, slant_tx = build_panel(n_tx, tx_pol, tx_layout,
+                                            spacing_v, spacing_h)
+        self.pos_rx, slant_rx = build_panel(n_rx, rx_pol, rx_layout,
+                                            spacing_v, spacing_h)
+        # polarization field vectors F = [cos ζ, sin ζ]  -> (n_ant, 2)
+        self.F_tx = np.stack([np.cos(slant_tx), np.sin(slant_tx)], axis=1)
+        self.F_rx = np.stack([np.cos(slant_rx), np.sin(slant_rx)], axis=1)
 
-        # precompute steering vectors (angle-only): (n_clu, RAYS, n_ant)
-        self.a_tx = _ula_steering(n_tx, self.aod, self.zod, tx_spacing)
-        self.a_rx = _ula_steering(n_rx, self.aoa, self.zoa, rx_spacing)
+        # --- per-ray polarization coupling matrix (eq. 7.5-22) ---
+        phi = self.rng.uniform(-np.pi, np.pi, size=(n_clu, self.RAYS, 2, 2))
+        M = np.exp(1j * phi)
+        inv_sqrt_k = np.sqrt(1.0 / self.kappa)
+        M[..., 0, 1] *= inv_sqrt_k
+        M[..., 1, 0] *= inv_sqrt_k
+        # coupling[c,m,u,s] = F_rx[u] . M[c,m] . F_tx[s]
+        self.coupling = np.einsum('ua,cmab,sb->cmus',
+                                  self.F_rx, M, self.F_tx)
 
-        # Doppler per ray from arrival direction . travel direction
+        # --- location phases per ray/element ---
+        self.a_tx = _location_phase(self.pos_tx, self.aod, self.zod)  # (c,m,s)
+        self.a_rx = _location_phase(self.pos_rx, self.aoa, self.zoa)  # (c,m,u)
+
+        # --- Doppler per ray from arrival direction . travel direction ---
         v_hat = _dir_cosines(np.array(travel_az_deg), np.array(travel_zen_deg))
-        rx_dir = _dir_cosines(self.aoa, self.zoa)             # (n_clu, RAYS, 3)
-        self.doppler = self.fd * (rx_dir @ v_hat)             # (n_clu, RAYS)
+        rx_dir = _dir_cosines(self.aoa, self.zoa)             # (c, m, 3)
+        self.doppler = self.fd * (rx_dir @ v_hat)             # (c, m)
+
+        # --- LOS specular terms ---
         if self.has_los:
-            los_rx = _dir_cosines(np.array(self.los_angles[1]),
-                                  np.array(self.los_angles[3]))
-            self.los_doppler = self.fd * float(los_rx @ v_hat)
-            self.los_a_tx = _ula_steering(
-                n_tx, np.array(self.los_angles[0]),
-                np.array(self.los_angles[2]), tx_spacing)
-            self.los_a_rx = _ula_steering(
-                n_rx, np.array(self.los_angles[1]),
-                np.array(self.los_angles[3]), rx_spacing)
+            los_pol = np.array([[1.0, 0.0], [0.0, -1.0]])     # eq. 7.5-29
+            self.los_coupling = self.F_rx @ los_pol @ self.F_tx.T  # (u, s)
+            a0, a1, z0, z1 = (self.los_angles[0], self.los_angles[1],
+                              self.los_angles[2], self.los_angles[3])
+            self.los_a_tx = _location_phase(self.pos_tx, np.array(a0),
+                                            np.array(z0))
+            self.los_a_rx = _location_phase(self.pos_rx, np.array(a1),
+                                            np.array(z1))
+            self.los_doppler = self.fd * float(
+                _dir_cosines(np.array(a1), np.array(z1)) @ v_hat)
+
+        # --- power normalisation so mean per-port power is unity ---
+        frx2 = np.abs(self.F_rx) ** 2                         # (n_rx, 2)
+        ftx2 = np.abs(self.F_tx) ** 2                         # (n_tx, 2)
+        diag = frx2 @ ftx2.T                                  # (n_rx, n_tx)
+        e_coupling = diag + (1.0 / self.kappa) * (1.0 - diag)
+        self.norm = 1.0 / np.sqrt(e_coupling.mean())
 
     def _cluster_spatial(self, t: float) -> np.ndarray:
         """Per-cluster spatial matrices at time ``t``: (n_clu, n_rx, n_tx)."""
-        # ray coefficient: sqrt(P_c / M) * exp(j(phase0 + 2*pi*doppler*t))
-        coef = np.sqrt(self.powers[:, None] / self.RAYS) \
-            * np.exp(1j * (self.phase0 + 2 * np.pi * self.doppler * t))
-        # H_c[r,t] = sum_m coef[c,m] * a_rx[c,m,r] * a_tx[c,m,t]
-        Hc = np.einsum('cm,cmr,cmt->crt', coef, self.a_rx, self.a_tx)
+        w = np.sqrt(self.powers[:, None] / self.RAYS) \
+            * np.exp(1j * 2 * np.pi * self.doppler * t)       # (c, m)
+        # H_c[u,s] = sum_m w[c,m] coupling[c,m,u,s] a_rx[c,m,u] a_tx[c,m,s]
+        Hc = np.einsum('cm,cmus,cmu,cms->cus', w, self.coupling,
+                       self.a_rx, self.a_tx)
         if self.has_los:
-            los = np.sqrt(self.p_los) * np.exp(1j * 2 * np.pi
-                                               * self.los_doppler * t)
-            Hc[0] += los * np.outer(self.los_a_rx, self.los_a_tx)
-        return Hc
+            los = np.sqrt(self.p_los) * np.exp(
+                1j * 2 * np.pi * self.los_doppler * t)
+            Hc[0] += los * self.los_coupling \
+                * np.outer(self.los_a_rx, self.los_a_tx)
+        return Hc * self.norm
 
     def frequency_response(self, freqs_hz: np.ndarray, t: float) -> np.ndarray:
         """MIMO frequency response H[freq, rx, tx] at time ``t``."""
         Hc = self._cluster_spatial(t)                         # (n_clu, rx, tx)
         phase = np.exp(-1j * 2 * np.pi
                        * freqs_hz[:, None] * self.delays_s[None, :])  # (f, c)
-        return np.einsum('fc,crt->frt', phase, Hc)
+        return np.einsum('fc,cus->fus', phase, Hc)

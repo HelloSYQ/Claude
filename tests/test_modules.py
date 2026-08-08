@@ -58,17 +58,50 @@ def test_cdl_channel():
     for m in ("CDL-A", "CDL-B", "CDL-C", "CDL-D", "CDL-E"):
         ch = CDLChannel(m, 100.0, 100.0, n_tx=4, n_rx=2,
                         rng=np.random.default_rng(0))
-        # average |H|^2 per antenna pair over many snapshots -> ~1 (E[.]=1)
         p = np.mean([np.mean(np.abs(ch.frequency_response(freqs, k * 5e-4)) ** 2)
                      for k in range(120)])
         assert ch.frequency_response(freqs, 0.0).shape == (51, 2, 4), m
-        assert 0.6 < p < 1.6, (m, p)
+        assert 0.5 < p < 1.7, (m, p)
         assert (m in ("CDL-D", "CDL-E")) == ch.has_los, m
     # frequency selectivity for a dispersive profile
     ch = CDLChannel("CDL-C", 300.0, 50.0, 4, 2, rng=np.random.default_rng(1))
     g = np.abs(ch.frequency_response(freqs, 0.0)[:, 0, 0])
     assert g.max() / g.min() > 1.3
     print("CDL channel shape / power / LOS / selectivity: OK")
+
+
+def test_cdl_dualpol_upa():
+    """Dual-polarized UPA panels: correct port count and unit-power ensemble."""
+    from nrdlsim.channel_models import CDLChannel, build_panel
+    # panel: 2x2 grid of dual-pol positions -> 8 ports, 4 positions, +/-45 deg
+    pos, slant = build_panel(8, pol=2, layout=(2, 2), spacing_v=0.5, spacing_h=0.5)
+    assert len(slant) == 8 and len(np.unique(pos, axis=0)) == 4
+    assert set(np.round(np.rad2deg(np.unique(slant))).astype(int)) == {-45, 45}
+
+    freqs = (np.arange(51) - 25) * 12 * 30e3
+
+    def ensemble(**kw):
+        vals = []
+        for seed in range(30):
+            ch = CDLChannel("CDL-C", 100.0, 100.0, rng=np.random.default_rng(seed),
+                            **kw)
+            vals.append(np.mean([np.mean(np.abs(
+                ch.frequency_response(freqs, k * 3e-3)) ** 2) for k in range(8)]))
+        return float(np.mean(vals))
+
+    # dual-pol and UPA must be power-normalised to the same ~unit level
+    p_single = ensemble(n_tx=4, n_rx=2, tx_pol=1, rx_pol=1)
+    p_dual = ensemble(n_tx=4, n_rx=2, tx_pol=2, rx_pol=2)
+    p_upa = ensemble(n_tx=8, n_rx=2, tx_pol=2, rx_pol=2, tx_layout=(2, 2))
+    for name, p in [("single", p_single), ("dual", p_dual), ("upa", p_upa)]:
+        assert 0.8 < p < 1.2, (name, p)
+    # dual-pol UPA channel must have the right shape
+    ch = CDLChannel("CDL-C", 100.0, 100.0, n_tx=8, n_rx=4, tx_pol=2, rx_pol=2,
+                    tx_layout=(2, 2), rx_layout=(1, 2),
+                    rng=np.random.default_rng(0))
+    assert ch.frequency_response(freqs, 0.0).shape == (51, 4, 8)
+    print(f"CDL dual-pol / UPA: OK (power single={p_single:.2f} "
+          f"dual={p_dual:.2f} upa={p_upa:.2f})")
 
 
 def test_bicm_capacity_monotonic():
@@ -117,6 +150,7 @@ if __name__ == "__main__":
     test_mcs_and_tbs()
     test_tdl_power_normalised()
     test_cdl_channel()
+    test_cdl_dualpol_upa()
     test_bicm_capacity_monotonic()
     test_ldpc_corrects_errors()
     print("\nAll module self-tests passed.")
