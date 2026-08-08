@@ -28,7 +28,7 @@ self-contained file under `nrdlsim/`:
 | `tbs.py` | Transport block size (≤3824-bit quantisation table + >3824 formula) | TS 38.214 §5.1.3.2 |
 | `resource_grid.py` | **Resource grid** + **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
 | `modulation.py` | QPSK/16/64/256-QAM Gray mapping and max-log **soft (LLR) demapping** | TS 38.211 §5.1 |
-| `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
+| `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
 | `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
 | `ldpc.py` | **DL-SCH coding**: CRC (24A/24B/16), code-block segmentation, base-graph (BG1/BG2) selection, QC-LDPC encode, normalised min-sum decode, rate matching | TS 38.212 §5, §7.2 |
 | `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression, NR-LDPC BLER model | — |
@@ -99,6 +99,11 @@ python run_simulation.py --model CDL-D --doppler 50    # LOS profile
 python run_simulation.py --model CDL-C --ntx 8 --nrx 4 \
     --tx-pol 2 --rx-pol 2 --tx-layout 2x2 --rx-layout 1x2 --layers 4
 
+# ...with the 38.901 directional element pattern and 8 deg downtilt
+python run_simulation.py --model CDL-C --ntx 8 --nrx 4 \
+    --tx-pol 2 --rx-pol 2 --tx-layout 2x2 --rx-layout 1x2 --layers 4 \
+    --tx-pattern 38.901 --downtilt 8 --element-gain 8
+
 # Fixed MCS (no link adaptation), higher Doppler
 python run_simulation.py --fixed-mcs --mcs 20 --doppler 300
 
@@ -122,6 +127,9 @@ python examples/compare_configs.py
 | `--tx-pol / --rx-pol` | CDL polarizations per position (1, or 2 for cross-polar ±45°) | 1 |
 | `--tx-layout / --rx-layout` | CDL panel `VxH` position grid (e.g. `2x2`); UPA when V>1 | auto (1×N) |
 | `--spacing-v / --spacing-h` | CDL element spacing (wavelengths) | 0.5 |
+| `--tx-pattern / --rx-pattern` | CDL element pattern: `omni` or `38.901` directional | omni |
+| `--downtilt / --boresight-az` | CDL tx mechanical downtilt / boresight azimuth (deg) | 0 |
+| `--element-gain` | CDL max element gain G_E,max (dBi) | 8.0 |
 | `--snr` | START STOP STEP (dB) | −5 30 2.5 |
 | `--slots` | slots simulated per SNR point | 200 |
 | `--csi-delay` | CSI report delay (slots) | 4 |
@@ -181,6 +189,15 @@ coding gain.
   positions. CDL-D/E add the deterministic Ricean specular LOS path (eq. 7.5-29).
   A scalar normalisation makes the average per-port power unity so the SNR sweep
   is comparable across array/polarization configurations.
+* Each element optionally carries the **3GPP directional radiation pattern**
+  (TR 38.901 Table 7.3-1): combined vertical/horizontal cuts with a configurable
+  3 dB beamwidth, front-to-back ratio, maximum gain G_E,max, boresight azimuth
+  and mechanical downtilt. The pattern scales each ray's field by √(gain) at its
+  departure/arrival angle, angularly filtering the multipath (fewer effective
+  clusters, altered spatial correlation and rank). The unit per-port-power
+  normalisation accounts for the pattern analytically, so enabling it reshapes
+  the channel's spatial structure without conflating it with a raw SNR offset.
+  Set `--tx-pattern 38.901` (default `omni` = isotropic 0 dBi).
 * Channel estimation, PMI selection and CQI use ideal-CSI SVD beamforming as a
   practical proxy for the Type-I codebook; DM-RS estimation error is modelled.
 * The `miesm` link abstraction is the standard methodology for producing SE

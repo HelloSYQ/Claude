@@ -113,6 +113,18 @@ class AntennaConfig:
     spacing_v: float = 0.5              # vertical element spacing (wavelengths)
     spacing_h: float = 0.5              # horizontal element spacing (wavelengths)
 
+    # Antenna element radiation pattern (TR 38.901 Table 7.3-1) for CDL.
+    # 'omni' = isotropic 0 dBi; '38.901' = directional sectored element.
+    tx_pattern: str = "omni"            # 'omni' or '38.901'
+    rx_pattern: str = "omni"            # 'omni' or '38.901'
+    boresight_az_deg: float = 0.0       # tx panel boresight azimuth
+    downtilt_deg: float = 0.0           # tx mechanical downtilt
+    rx_boresight_az_deg: float = 0.0    # rx panel boresight azimuth
+    rx_downtilt_deg: float = 0.0        # rx mechanical downtilt
+    element_max_gain_dbi: float = 8.0   # G_E,max
+    element_hpbw_deg: float = 65.0      # 3 dB beamwidth (theta_3dB, phi_3dB)
+    element_front_back_db: float = 30.0  # SLA_V and A_max
+
 
 @dataclass
 class ChannelConfig:

@@ -104,6 +104,43 @@ def test_cdl_dualpol_upa():
           f"dual={p_dual:.2f} upa={p_upa:.2f})")
 
 
+def test_antenna_gain_shaping():
+    """TR 38.901 element pattern: boresight/3dB/backlobe gains and angular
+    filtering, with unit-power normalisation preserved."""
+    from nrdlsim.channel_models import element_power_gain, CDLChannel
+
+    def dbi(az, zen):
+        return 10 * np.log10(element_power_gain(az, zen))
+
+    assert abs(dbi(0, 90) - 8.0) < 1e-6                 # boresight = G_max
+    assert abs(dbi(32.5, 90) - 5.0) < 1e-2              # -3 dB at hpbw/2
+    assert abs(dbi(0, 122.5) - 5.0) < 1e-2              # -3 dB in elevation
+    assert abs(dbi(180, 90) - (-22.0)) < 1e-6           # backlobe floor
+
+    freqs = (np.arange(51) - 25) * 12 * 30e3
+
+    def ens(**kw):
+        v = []
+        for s in range(30):
+            ch = CDLChannel("CDL-C", 100.0, 100.0, rng=np.random.default_rng(s),
+                            **kw)
+            v.append(np.mean([np.mean(np.abs(
+                ch.frequency_response(freqs, k * 3e-3)) ** 2) for k in range(8)]))
+        return float(np.mean(v))
+
+    base = dict(n_tx=8, n_rx=2, tx_pol=2, rx_pol=2, tx_layout=(2, 2))
+    p_omni = ens(**base)
+    p_dir = ens(tx_pattern="38.901", rx_pattern="38.901", **base)
+    assert 0.85 < p_omni < 1.15 and 0.85 < p_dir < 1.15  # normalisation holds
+
+    # directional element angularly filters the rays -> non-unit ray gains
+    ch = CDLChannel("CDL-C", 100.0, 100.0, tx_pattern="38.901", downtilt_deg=8.0,
+                    rng=np.random.default_rng(1), **base)
+    assert ch.ray_gain.min() < 0.5 < ch.ray_gain.max()
+    print(f"antenna gain shaping: OK (|H|^2 omni={p_omni:.2f} dir={p_dir:.2f}, "
+          f"ray_gain {ch.ray_gain.min():.2f}..{ch.ray_gain.max():.2f})")
+
+
 def test_bicm_capacity_monotonic():
     snr = np.linspace(-10, 30, 20)
     for qm in (2, 4, 6, 8):
@@ -151,6 +188,7 @@ if __name__ == "__main__":
     test_tdl_power_normalised()
     test_cdl_channel()
     test_cdl_dualpol_upa()
+    test_antenna_gain_shaping()
     test_bicm_capacity_monotonic()
     test_ldpc_corrects_errors()
     print("\nAll module self-tests passed.")

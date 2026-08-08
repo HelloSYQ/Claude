@@ -38,7 +38,11 @@ def build_config(args) -> SimConfig:
                             tx_pol=args.tx_pol, rx_pol=args.rx_pol,
                             tx_layout=_parse_layout(args.tx_layout),
                             rx_layout=_parse_layout(args.rx_layout),
-                            spacing_v=args.spacing_v, spacing_h=args.spacing_h)
+                            spacing_v=args.spacing_v, spacing_h=args.spacing_h,
+                            tx_pattern=args.tx_pattern, rx_pattern=args.rx_pattern,
+                            boresight_az_deg=args.boresight_az,
+                            downtilt_deg=args.downtilt,
+                            element_max_gain_dbi=args.element_gain)
     channel = ChannelConfig(model=args.model, delay_spread_ns=args.ds,
                             max_doppler_hz=args.doppler,
                             carrier_freq_hz=args.fc)
@@ -80,6 +84,16 @@ def main():
                    help="CDL: vertical element spacing (wavelengths)")
     p.add_argument("--spacing-h", type=float, default=0.5,
                    help="CDL: horizontal element spacing (wavelengths)")
+    p.add_argument("--tx-pattern", default="omni", choices=["omni", "38.901"],
+                   help="CDL tx element pattern: omni or 38.901 directional")
+    p.add_argument("--rx-pattern", default="omni", choices=["omni", "38.901"],
+                   help="CDL rx element pattern")
+    p.add_argument("--downtilt", type=float, default=0.0,
+                   help="CDL: tx mechanical downtilt (deg, 38.901 pattern)")
+    p.add_argument("--boresight-az", type=float, default=0.0,
+                   help="CDL: tx panel boresight azimuth (deg)")
+    p.add_argument("--element-gain", type=float, default=8.0,
+                   help="CDL: max element gain G_E,max (dBi)")
     p.add_argument("--model", default="TDL-C",
                    help="channel model: TDL-A..E, CDL-A..E or AWGN")
     p.add_argument("--ds", type=float, default=100.0, help="delay spread (ns)")

@@ -71,6 +71,13 @@ class NRDownlinkSimulator:
                 tx_pol=a.tx_pol, rx_pol=a.rx_pol,
                 tx_layout=a.tx_layout, rx_layout=a.rx_layout,
                 spacing_v=a.spacing_v, spacing_h=a.spacing_h,
+                tx_pattern=a.tx_pattern, rx_pattern=a.rx_pattern,
+                boresight_az_deg=a.boresight_az_deg, downtilt_deg=a.downtilt_deg,
+                rx_boresight_az_deg=a.rx_boresight_az_deg,
+                rx_downtilt_deg=a.rx_downtilt_deg,
+                element_max_gain_dbi=a.element_max_gain_dbi,
+                element_hpbw_deg=a.element_hpbw_deg,
+                element_front_back_db=a.element_front_back_db,
                 rng=rng)
             return chan, rng
         chan = TDLChannel(

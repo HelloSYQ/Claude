@@ -358,6 +358,26 @@ def build_panel(n_ant: int, pol: int, layout, spacing_v: float,
     return np.array(positions), np.array(slant)
 
 
+def element_power_gain(az_deg, zen_deg, boresight_az_deg=0.0,
+                       downtilt_deg=0.0, g_max_dbi=8.0, hpbw_deg=65.0,
+                       front_back_db=30.0):
+    """3GPP directional antenna element power gain (TR 38.901 Table 7.3-1).
+
+    Combines the vertical and horizontal cuts and adds the maximum element
+    gain G_E,max.  Returns the *linear* power gain evaluated at the ray angle
+    relative to the panel boresight (azimuth ``boresight_az_deg`` and mechanical
+    downtilt ``downtilt_deg``).  Isotropic behaviour is obtained by not calling
+    this (gain = 1).
+    """
+    phi = ((np.asarray(az_deg) - boresight_az_deg + 180.0) % 360.0) - 180.0
+    theta = np.asarray(zen_deg)
+    a_v = -np.minimum(12.0 * ((theta - 90.0 - downtilt_deg) / hpbw_deg) ** 2,
+                      front_back_db)
+    a_h = -np.minimum(12.0 * (phi / hpbw_deg) ** 2, front_back_db)
+    a_db = -np.minimum(-(a_v + a_h), front_back_db)
+    return 10.0 ** ((g_max_dbi + a_db) / 10.0)
+
+
 def _location_phase(positions: np.ndarray, az_deg: np.ndarray,
                     zen_deg: np.ndarray) -> np.ndarray:
     """Per-element location phase exp(j 2*pi position . r_hat).
@@ -395,6 +415,11 @@ class CDLChannel:
                  tx_pol: int = 1, rx_pol: int = 1,
                  tx_layout=None, rx_layout=None,
                  spacing_v: float = 0.5, spacing_h: float = 0.5,
+                 tx_pattern: str = "omni", rx_pattern: str = "omni",
+                 boresight_az_deg: float = 0.0, downtilt_deg: float = 0.0,
+                 rx_boresight_az_deg: float = 0.0, rx_downtilt_deg: float = 0.0,
+                 element_max_gain_dbi: float = 8.0, element_hpbw_deg: float = 65.0,
+                 element_front_back_db: float = 30.0,
                  travel_az_deg: float = 0.0, travel_zen_deg: float = 90.0,
                  rng=None):
         if model not in _CDL:
@@ -467,6 +492,22 @@ class CDLChannel:
         rx_dir = _dir_cosines(self.aoa, self.zoa)             # (c, m, 3)
         self.doppler = self.fd * (rx_dir @ v_hat)             # (c, m)
 
+        # --- antenna element gain shaping (TR 38.901 Table 7.3-1) ---
+        gain_kw = dict(g_max_dbi=element_max_gain_dbi, hpbw_deg=element_hpbw_deg,
+                       front_back_db=element_front_back_db)
+        if tx_pattern == "38.901":
+            g_tx = element_power_gain(self.aod, self.zod, boresight_az_deg,
+                                      downtilt_deg, **gain_kw)
+        else:
+            g_tx = np.ones((n_clu, self.RAYS))
+        if rx_pattern == "38.901":
+            g_rx = element_power_gain(self.aoa, self.zoa, rx_boresight_az_deg,
+                                      rx_downtilt_deg, **gain_kw)
+        else:
+            g_rx = np.ones((n_clu, self.RAYS))
+        # field-amplitude factor per ray = sqrt(power gain tx * power gain rx)
+        self.ray_gain = np.sqrt(g_tx * g_rx)                  # (c, m)
+
         # --- LOS specular terms ---
         if self.has_los:
             los_pol = np.array([[1.0, 0.0], [0.0, -1.0]])     # eq. 7.5-29
@@ -479,23 +520,36 @@ class CDLChannel:
                                             np.array(z1))
             self.los_doppler = self.fd * float(
                 _dir_cosines(np.array(a1), np.array(z1)) @ v_hat)
+            g_tx_los = (element_power_gain(a0, z0, boresight_az_deg,
+                                           downtilt_deg, **gain_kw)
+                        if tx_pattern == "38.901" else 1.0)
+            g_rx_los = (element_power_gain(a1, z1, rx_boresight_az_deg,
+                                           rx_downtilt_deg, **gain_kw)
+                        if rx_pattern == "38.901" else 1.0)
+            self.los_gain = float(np.sqrt(g_tx_los * g_rx_los))
 
         # --- power normalisation so mean per-port power is unity ---
+        # E[|H_us|^2] = e_coupling[u,s] * sum_cm (P_c/M) g_tx g_rx   (+ LOS term)
         frx2 = np.abs(self.F_rx) ** 2                         # (n_rx, 2)
         ftx2 = np.abs(self.F_tx) ** 2                         # (n_tx, 2)
         diag = frx2 @ ftx2.T                                  # (n_rx, n_tx)
         e_coupling = diag + (1.0 / self.kappa) * (1.0 - diag)
-        self.norm = 1.0 / np.sqrt(e_coupling.mean())
+        g_diffuse = np.sum(self.powers[:, None] / self.RAYS * self.ray_gain ** 2)
+        power_us = e_coupling * g_diffuse
+        if self.has_los:
+            power_us = power_us + (self.p_los * self.los_gain ** 2
+                                   * np.abs(self.los_coupling) ** 2)
+        self.norm = 1.0 / np.sqrt(power_us.mean())
 
     def _cluster_spatial(self, t: float) -> np.ndarray:
         """Per-cluster spatial matrices at time ``t``: (n_clu, n_rx, n_tx)."""
-        w = np.sqrt(self.powers[:, None] / self.RAYS) \
+        w = np.sqrt(self.powers[:, None] / self.RAYS) * self.ray_gain \
             * np.exp(1j * 2 * np.pi * self.doppler * t)       # (c, m)
         # H_c[u,s] = sum_m w[c,m] coupling[c,m,u,s] a_rx[c,m,u] a_tx[c,m,s]
         Hc = np.einsum('cm,cmus,cmu,cms->cus', w, self.coupling,
                        self.a_rx, self.a_tx)
         if self.has_los:
-            los = np.sqrt(self.p_los) * np.exp(
+            los = np.sqrt(self.p_los) * self.los_gain * np.exp(
                 1j * 2 * np.pi * self.los_doppler * t)
             Hc[0] += los * self.los_coupling \
                 * np.outer(self.los_a_rx, self.los_a_tx)
