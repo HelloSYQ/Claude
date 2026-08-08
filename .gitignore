@@ -12,3 +12,5 @@ results/se_results.json
 !results/example_*.png
 !results/example_*.json
 !results/compare_se.png
+!results/waveform_impairments.png
+dist/

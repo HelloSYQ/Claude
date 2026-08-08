@@ -141,6 +141,42 @@ def test_antenna_gain_shaping():
           f"ray_gain {ch.ray_gain.min():.2f}..{ch.ray_gain.max():.2f})")
 
 
+def test_ofdm_waveform():
+    """Time-domain OFDM: loopback identity, CP orthogonality, CFO ICI, timing."""
+    from nrdlsim.ofdm import (OFDMModulator, waveform_evm, cfo_ici_sinr_db,
+                              apply_multipath)
+    rng = np.random.default_rng(0)
+    mod = OFDMModulator(51, 30e3, mu=1)
+    cp = int(mod.cp[1])
+    g = ((rng.integers(0, 2, (mod.n_sc, mod.n_sym)) * 2 - 1)
+         + 1j * (rng.integers(0, 2, (mod.n_sc, mod.n_sym)) * 2 - 1)) / np.sqrt(2)
+
+    # 1) perfect reconstruction with no channel/impairment/noise
+    err = np.max(np.abs(mod.demodulate(mod.modulate(g)) - g))
+    assert err < 1e-9, err
+
+    # 2) CP preserves orthogonality when delay < CP: time-domain multipath
+    #    equals per-subcarrier multiply by the channel frequency response
+    h = np.zeros(20, complex); h[0] = 1; h[5] = 0.5; h[12] = 0.3j
+    grh = mod.demodulate(apply_multipath(mod.modulate(g), h))
+    H = mod.channel_frequency(h)[:, None]
+    assert np.max(np.abs(grh - H * g)) < 1e-9
+
+    # 3) CFO-induced SINR matches the analytic ICI ceiling within ~1 dB
+    for eps in (0.01, 0.02, 0.05):
+        _, sinr = waveform_evm(mod, g, 50, cfo_hz=eps * 30e3, h_time=h,
+                               rng=np.random.default_rng(1))
+        assert abs(sinr - cfo_ici_sinr_db(eps * 30e3, 30e3)) < 1.5, eps
+
+    # 4) timing error inside the CP is recoverable; beyond it causes ISI
+    _, s_in = waveform_evm(mod, g, 50, timing_offset=-cp // 2, h_time=h,
+                           rng=np.random.default_rng(2))
+    _, s_out = waveform_evm(mod, g, 50, timing_offset=-cp - 40, h_time=h,
+                            rng=np.random.default_rng(2))
+    assert s_in > 45 and s_out < 20
+    print("OFDM waveform: loopback / CP orthogonality / CFO ICI / timing: OK")
+
+
 def test_bicm_capacity_monotonic():
     snr = np.linspace(-10, 30, 20)
     for qm in (2, 4, 6, 8):
@@ -189,6 +225,7 @@ if __name__ == "__main__":
     test_cdl_channel()
     test_cdl_dualpol_upa()
     test_antenna_gain_shaping()
+    test_ofdm_waveform()
     test_bicm_capacity_monotonic()
     test_ldpc_corrects_errors()
     print("\nAll module self-tests passed.")

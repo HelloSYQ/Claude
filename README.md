@@ -28,6 +28,7 @@ self-contained file under `nrdlsim/`:
 | `tbs.py` | Transport block size (≤3824-bit quantisation table + >3824 formula) | TS 38.214 §5.1.3.2 |
 | `resource_grid.py` | **Resource grid** + **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
 | `modulation.py` | QPSK/16/64/256-QAM Gray mapping and max-log **soft (LLR) demapping** | TS 38.211 §5.1 |
+| `ofdm.py` | **Time-domain CP-OFDM waveform** (IFFT + cyclic prefix / FFT), RF impairments (**CFO, timing offset**), multipath, EVM measurement | TS 38.211 §5.3 |
 | `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
 | `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
 | `ldpc.py` | **DL-SCH coding**: CRC (24A/24B/16), code-block segmentation, base-graph (BG1/BG2) selection, QC-LDPC encode, normalised min-sum decode, rate matching | TS 38.212 §5, §7.2 |
@@ -112,6 +113,9 @@ python run_simulation.py --fec ldpc --snr 0 12 3 --slots 30 --ntx 2 --nrx 2
 
 # Compare channel models and MIMO orders (writes results/compare_se.png)
 python examples/compare_configs.py
+
+# Time-domain OFDM waveform: EVM vs CFO and timing offset
+python examples/waveform_demo.py
 ```
 
 ### Key CLI options
@@ -171,6 +175,26 @@ TDL fading power normalisation, monotone BICM capacity, and genuine LDPC
 coding gain.
 
 ---
+
+## Time-domain waveform path
+
+`nrdlsim/ofdm.py` provides a true sample-level CP-OFDM chain — resource grid →
+IFFT + cyclic prefix → RF impairments + multipath + AWGN → CP removal + FFT →
+one-tap equalisation — with configurable **carrier frequency offset** and
+**symbol-timing offset**. It captures effects the frequency-domain SE loop
+abstracts away, and is validated against theory (`examples/waveform_demo.py`):
+
+* loopback reconstruction is exact (error ~1e-15);
+* with delay spread < CP, time-domain multipath equals the per-subcarrier
+  frequency-domain multiply (the CP orthogonality property);
+* a CFO drives the effective SINR down to the analytic ICI ceiling
+  `3/(π·ε)²` (ε = f_CFO/SCS) to within ~0.1 dB;
+* a timing offset inside the CP is fully recoverable; beyond it, ISI collapses
+  the SINR.
+
+The main spectral-efficiency sweep runs in the frequency domain (exact when the
+CP covers the delay spread and sync is ideal); the waveform module is the
+sample-level path for studying synchronisation and CP-overrun.
 
 ## Notes and scope
 
