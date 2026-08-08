@@ -5,6 +5,7 @@ __pycache__/
 venv/
 myvenv/
 .DS_Store
+dist/
 results/se_vs_snr.png
 results/se_results.json
 !results/.gitkeep
