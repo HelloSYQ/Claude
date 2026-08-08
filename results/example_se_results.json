@@ -1,0 +1,149 @@
+{
+  "config": {
+    "mu": 1,
+    "rb": 51,
+    "bandwidth_hz": 18360000.0,
+    "ntx": 4,
+    "nrx": 2,
+    "channel": "TDL-C",
+    "mcs_table": 2,
+    "fec_mode": "miesm"
+  },
+  "points": [
+    {
+      "snr_db": -5.0,
+      "se": 0.37593899782135076,
+      "throughput_bps": 6902240.0,
+      "bler": 0.1,
+      "avg_mcs": 1.03,
+      "avg_rank": 1.97,
+      "avg_cqi": 2.88
+    },
+    {
+      "snr_db": -2.5,
+      "se": 0.4312244008714597,
+      "throughput_bps": 7917280.0,
+      "bler": 0.11,
+      "avg_mcs": 1.64,
+      "avg_rank": 1.77,
+      "avg_cqi": 3.84
+    },
+    {
+      "snr_db": 0.0,
+      "se": 0.5772113289760349,
+      "throughput_bps": 10597600.0,
+      "bler": 0.11,
+      "avg_mcs": 1.95,
+      "avg_rank": 1.95,
+      "avg_cqi": 4.07
+    },
+    {
+      "snr_db": 2.5,
+      "se": 0.8261176470588235,
+      "throughput_bps": 15167520.0,
+      "bler": 0.11,
+      "avg_mcs": 2.65,
+      "avg_rank": 2.0,
+      "avg_cqi": 4.94
+    },
+    {
+      "snr_db": 5.0,
+      "se": 1.1627625272331155,
+      "throughput_bps": 21348320.0,
+      "bler": 0.11,
+      "avg_mcs": 3.65,
+      "avg_rank": 2.0,
+      "avg_cqi": 6.02
+    },
+    {
+      "snr_db": 7.5,
+      "se": 2.0836688453159042,
+      "throughput_bps": 38256160.0,
+      "bler": 0.11,
+      "avg_mcs": 6.35,
+      "avg_rank": 2.0,
+      "avg_cqi": 7.16
+    },
+    {
+      "snr_db": 10.0,
+      "se": 2.8453159041394334,
+      "throughput_bps": 52240000.0,
+      "bler": 0.12,
+      "avg_mcs": 8.66,
+      "avg_rank": 2.0,
+      "avg_cqi": 8.04
+    },
+    {
+      "snr_db": 12.5,
+      "se": 3.4848714596949892,
+      "throughput_bps": 63982240.0,
+      "bler": 0.12,
+      "avg_mcs": 10.77,
+      "avg_rank": 2.0,
+      "avg_cqi": 9.24
+    },
+    {
+      "snr_db": 15.0,
+      "se": 4.4424662309368195,
+      "throughput_bps": 81563680.0,
+      "bler": 0.11,
+      "avg_mcs": 13.49,
+      "avg_rank": 2.0,
+      "avg_cqi": 9.84
+    },
+    {
+      "snr_db": 17.5,
+      "se": 4.959137254901961,
+      "throughput_bps": 91049760.0,
+      "bler": 0.11,
+      "avg_mcs": 14.94,
+      "avg_rank": 2.0,
+      "avg_cqi": 10.59
+    },
+    {
+      "snr_db": 20.0,
+      "se": 5.739023965141612,
+      "throughput_bps": 105368480.0,
+      "bler": 0.1,
+      "avg_mcs": 16.84,
+      "avg_rank": 2.0,
+      "avg_cqi": 11.72
+    },
+    {
+      "snr_db": 22.5,
+      "se": 6.540575163398692,
+      "throughput_bps": 120084960.0,
+      "bler": 0.09,
+      "avg_mcs": 18.61,
+      "avg_rank": 2.0,
+      "avg_cqi": 12.07
+    },
+    {
+      "snr_db": 25.0,
+      "se": 7.353063180827887,
+      "throughput_bps": 135002240.0,
+      "bler": 0.09,
+      "avg_mcs": 20.75,
+      "avg_rank": 2.0,
+      "avg_cqi": 12.48
+    },
+    {
+      "snr_db": 27.5,
+      "se": 8.035407407407407,
+      "throughput_bps": 147530080.0,
+      "bler": 0.09,
+      "avg_mcs": 22.52,
+      "avg_rank": 2.0,
+      "avg_cqi": 13.62
+    },
+    {
+      "snr_db": 30.0,
+      "se": 8.995032679738562,
+      "throughput_bps": 165148800.0,
+      "bler": 0.07,
+      "avg_mcs": 24.33,
+      "avg_rank": 2.0,
+      "avg_cqi": 14.08
+    }
+  ]
+}

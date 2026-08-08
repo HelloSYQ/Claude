@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+myvenv/
+.DS_Store
+results/se_vs_snr.png
+results/se_results.json
+!results/.gitkeep
+!results/example_*.png
+!results/example_*.json
+!results/compare_se.png
