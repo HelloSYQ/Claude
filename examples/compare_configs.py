@@ -37,8 +37,8 @@ def main():
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
 
     print("Channel-model comparison (2x2)...")
-    for model, col in [("AWGN", "#111827"), ("TDL-A", "#2563eb"),
-                       ("TDL-C", "#16a34a"), ("TDL-D", "#dc2626")]:
+    for model, col in [("AWGN", "#111827"), ("TDL-C", "#2563eb"),
+                       ("CDL-C", "#16a34a"), ("CDL-D", "#dc2626")]:
         snr, se = sweep(model, 2, 2)
         ax1.plot(snr, se, "o-", label=model, color=col, lw=1.8, ms=4)
         print(f"  {model:6s} peak SE = {se.max():.2f} b/s/Hz")

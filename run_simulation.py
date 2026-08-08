@@ -56,7 +56,7 @@ def main():
     p.add_argument("--correlation", default="low",
                    choices=["low", "medium", "high"])
     p.add_argument("--model", default="TDL-C",
-                   help="channel model: TDL-A..E or AWGN")
+                   help="channel model: TDL-A..E, CDL-A..E or AWGN")
     p.add_argument("--ds", type=float, default=100.0, help="delay spread (ns)")
     p.add_argument("--doppler", type=float, default=100.0, help="max Doppler (Hz)")
     p.add_argument("--fc", type=float, default=3.5e9, help="carrier freq (Hz)")

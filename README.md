@@ -28,7 +28,7 @@ self-contained file under `nrdlsim/`:
 | `tbs.py` | Transport block size (≤3824-bit quantisation table + >3824 formula) | TS 38.214 §5.1.3.2 |
 | `resource_grid.py` | **Resource grid** + **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
 | `modulation.py` | QPSK/16/64/256-QAM Gray mapping and max-log **soft (LLR) demapping** | TS 38.211 §5.1 |
-| `channel_models.py` | **NR channel generation**: TDL-A…E with configurable delay spread & Doppler, sum-of-sinusoids fading, Rician LOS taps, Kronecker MIMO correlation | TR 38.901 §7.7.2 |
+| `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, ULA steering vectors, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.7.1–7.7.2 |
 | `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
 | `ldpc.py` | **DL-SCH coding**: CRC (24A/24B/16), code-block segmentation, base-graph (BG1/BG2) selection, QC-LDPC encode, normalised min-sum decode, rate matching | TS 38.212 §5, §7.2 |
 | `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression, NR-LDPC BLER model | — |
@@ -91,6 +91,10 @@ python run_simulation.py --plot
 # AWGN SISO baseline
 python run_simulation.py --model AWGN --ntx 1 --nrx 1
 
+# CDL clustered-delay-line channel (geometric MIMO)
+python run_simulation.py --model CDL-C --ds 300 --plot
+python run_simulation.py --model CDL-D --doppler 50    # LOS profile
+
 # Fixed MCS (no link adaptation), higher Doppler
 python run_simulation.py --fixed-mcs --mcs 20 --doppler 300
 
@@ -108,7 +112,7 @@ python examples/compare_configs.py
 | `--mu` | numerology (SCS = 15·2^μ kHz) | 1 (30 kHz) |
 | `--rb` | resource blocks (bandwidth) | 51 |
 | `--ntx / --nrx` | gNB / UE antennas | 4 / 2 |
-| `--model` | `TDL-A…E` or `AWGN` | TDL-C |
+| `--model` | `TDL-A…E`, `CDL-A…E` or `AWGN` | TDL-C |
 | `--ds / --doppler` | delay spread (ns) / max Doppler (Hz) | 100 / 100 |
 | `--mcs-table` | 1 (64QAM), 2 (256QAM), 3 (low-SE) | 2 |
 | `--snr` | START STOP STEP (dB) | −5 30 2.5 |
@@ -158,6 +162,13 @@ coding gain.
 * The MIMO TDL construction is the **correlation-based** extension of the
   SISO TDL models (Kronecker spatial correlation on i.i.d. per-tap fading),
   matching how TDL is applied to multi-antenna links.
+* The **CDL** models synthesise the MIMO channel from the geometric cluster
+  angles via uniform-linear-array (0.5λ) steering vectors, so they carry the
+  true angular/spatial structure (beamforming gain, spatial correlation) rather
+  than a correlation surrogate. CDL-D/E include the Ricean specular LOS path.
+  Ray angles use the Table 7.5-3 offsets scaled by the per-cluster spreads with
+  random AoA/ZoA ray coupling; a single polarisation is modelled (XPR values are
+  tabulated but polarisation combining is not applied).
 * Channel estimation, PMI selection and CQI use ideal-CSI SVD beamforming as a
   practical proxy for the Type-I codebook; DM-RS estimation error is modelled.
 * The `miesm` link abstraction is the standard methodology for producing SE

@@ -51,6 +51,26 @@ def test_tdl_power_normalised():
     print(f"TDL fading power sanity: OK (mean tap power sum ~ {p:.2f})")
 
 
+def test_cdl_channel():
+    """CDL models: correct shape, ~unit average gain, and freq selectivity."""
+    from nrdlsim.channel_models import CDLChannel
+    freqs = (np.arange(51) - 25) * 12 * 30e3
+    for m in ("CDL-A", "CDL-B", "CDL-C", "CDL-D", "CDL-E"):
+        ch = CDLChannel(m, 100.0, 100.0, n_tx=4, n_rx=2,
+                        rng=np.random.default_rng(0))
+        # average |H|^2 per antenna pair over many snapshots -> ~1 (E[.]=1)
+        p = np.mean([np.mean(np.abs(ch.frequency_response(freqs, k * 5e-4)) ** 2)
+                     for k in range(120)])
+        assert ch.frequency_response(freqs, 0.0).shape == (51, 2, 4), m
+        assert 0.6 < p < 1.6, (m, p)
+        assert (m in ("CDL-D", "CDL-E")) == ch.has_los, m
+    # frequency selectivity for a dispersive profile
+    ch = CDLChannel("CDL-C", 300.0, 50.0, 4, 2, rng=np.random.default_rng(1))
+    g = np.abs(ch.frequency_response(freqs, 0.0)[:, 0, 0])
+    assert g.max() / g.min() > 1.3
+    print("CDL channel shape / power / LOS / selectivity: OK")
+
+
 def test_bicm_capacity_monotonic():
     snr = np.linspace(-10, 30, 20)
     for qm in (2, 4, 6, 8):
@@ -96,6 +116,7 @@ if __name__ == "__main__":
     test_modulation_roundtrip_no_noise()
     test_mcs_and_tbs()
     test_tdl_power_normalised()
+    test_cdl_channel()
     test_bicm_capacity_monotonic()
     test_ldpc_corrects_errors()
     print("\nAll module self-tests passed.")

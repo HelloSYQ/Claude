@@ -26,7 +26,7 @@ from .config import SimConfig
 from . import mcs_tables
 from . import tbs as tbs_mod
 from . import resource_grid as rg
-from .channel_models import TDLChannel, awgn_frequency_response
+from .channel_models import TDLChannel, CDLChannel, awgn_frequency_response
 from .csi import compute_csi, CSIFeedbackChannel
 from .scheduler import Scheduler
 from .layer_mapping import svd_precoder
@@ -57,10 +57,20 @@ class NRDownlinkSimulator:
     def _make_channel(self, snr_seed: int):
         c = self.cfg
         rng = np.random.default_rng(c.seed + snr_seed)
-        if c.channel.model.upper() == "AWGN":
+        model = c.channel.model
+        if model.upper() == "AWGN":
             return None, rng
+        if model.upper().startswith("CDL"):
+            chan = CDLChannel(
+                model=model,
+                delay_spread_ns=c.channel.delay_spread_ns,
+                max_doppler_hz=c.channel.max_doppler_hz,
+                n_tx=c.antenna.n_tx, n_rx=c.antenna.n_rx,
+                carrier_freq_hz=c.channel.carrier_freq_hz,
+                rng=rng)
+            return chan, rng
         chan = TDLChannel(
-            model=c.channel.model,
+            model=model,
             delay_spread_ns=c.channel.delay_spread_ns,
             max_doppler_hz=c.channel.max_doppler_hz,
             n_tx=c.antenna.n_tx, n_rx=c.antenna.n_rx,
