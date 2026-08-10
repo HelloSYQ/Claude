@@ -129,7 +129,10 @@ class NRDownlinkSimulator:
             H_true = self._channel_response(chan, t, n_rb)
 
             # --- UE: channel estimation + CSI feedback ---
-            H_est = estimate_channel_from_dmrs(H_true, noise_var, rng)
+            if c.ideal_channel_estimation:
+                H_est = H_true
+            else:
+                H_est = estimate_channel_from_dmrs(H_true, noise_var, rng)
             report = compute_csi(H_est, noise_var, max_rank,
                                  c.pdsch.mcs_table, c.pdsch.target_bler)
             csi_fb.push(report)
@@ -150,11 +153,24 @@ class NRDownlinkSimulator:
             tb_bits = tbs_mod.compute_tbs(n_re_prb, n_rb, info.modulation_order,
                                           info.target_code_rate, rank)
 
-            # --- precoder actually used (from the delayed CSI report) ---
-            W = active_csi.precoder if active_csi is not None else \
-                svd_precoder(H_est, rank)
-            if W.shape[2] != rank:
-                W = svd_precoder(H_est, rank)
+            # --- precoder actually used ---
+            if c.precoding == "none":
+                # open-loop: map layers straight to the first `rank` antenna
+                # ports (no transmit CSI), receiver separates the streams
+                W = np.zeros((n_rb, c.antenna.n_tx, rank), dtype=complex)
+                eye = np.eye(c.antenna.n_tx)[:, :rank]
+                W[:] = eye
+            else:
+                # closed-loop SVD precoding from the (delayed) CSI report
+                W = active_csi.precoder if active_csi is not None else \
+                    svd_precoder(H_est, rank)
+                if W.shape[2] != rank:
+                    W = svd_precoder(H_est, rank)
+
+            # total transmit power constraint: split the (fixed) power across
+            # layers so SNR is defined as total Es/N0 (a rank-2 transmission
+            # does not get 2x the power of a rank-1 one).
+            W = W / np.sqrt(rank)
 
             # --- post-equaliser SINR over the (true) channel ---
             re_to_rb = np.arange(n_rb)

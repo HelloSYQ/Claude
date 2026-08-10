@@ -55,6 +55,8 @@ def build_config(args) -> SimConfig:
         csi_feedback_delay_slots=args.csi_delay,
         link_adaptation=not args.fixed_mcs,
         fec_mode=args.fec,
+        precoding=args.precoding,
+        ideal_channel_estimation=args.ideal_csi,
         seed=args.seed,
     )
 
@@ -107,6 +109,10 @@ def main():
                    help="disable link adaptation (use fixed --mcs)")
     p.add_argument("--no-harq", action="store_true")
     p.add_argument("--fec", default="miesm", choices=["miesm", "ldpc"])
+    p.add_argument("--precoding", default="svd", choices=["svd", "none"],
+                   help="svd = closed-loop; none = open-loop (no tx precoding)")
+    p.add_argument("--ideal-csi", action="store_true",
+                   help="perfect channel estimation at the receiver")
     p.add_argument("--seed", type=int, default=2025)
     p.add_argument("--plot", action="store_true")
     p.add_argument("--out", default="results/se_results.json")

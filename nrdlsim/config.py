@@ -158,4 +158,6 @@ class SimConfig:
     csi_feedback_delay_slots: int = 4          # CSI report delay
     link_adaptation: bool = True               # use CQI-driven MCS selection
     fec_mode: str = "miesm"                    # 'miesm' (fast) or 'ldpc' (bit-true)
+    ideal_channel_estimation: bool = False     # perfect CSI at the receiver
+    precoding: str = "svd"                     # 'svd' (closed-loop) or 'none' (open-loop)
     seed: int = 2025

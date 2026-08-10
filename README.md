@@ -164,6 +164,18 @@ The **spectral efficiency** is computed as
 SE = delivered_information_bits / (num_slots · slot_duration) / occupied_bandwidth
 ```
 
+## Calibration against 3GPP / 5G-IA
+
+`examples/calibration_5gia.py` reproduces the **5G-IA link-level calibration**
+cases (SNR at 70 % throughput, 3GPP RAN4 FR1/FDD) and compares to the published
+company results. The simulator tracks the case-to-case behaviour to within
+**~0.9 dB** (bias-removed) across QPSK/16QAM/64QAM, TDL-A/B/C and SIMO/2×2 MIMO,
+with a consistent ~1.5 dB optimistic bias from the MIESM coding-gap abstraction.
+See [`docs/calibration.md`](docs/calibration.md) for the full table and
+analysis. This exercise also surfaced and fixed a transmit-power normalization
+bug (each layer had received full power; now total power is split across layers,
+SNR = total Es/N0).
+
 ## Tests
 
 ```bash
