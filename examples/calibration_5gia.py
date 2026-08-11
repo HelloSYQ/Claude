@@ -34,11 +34,22 @@ CASES = {
     9: (40, 30, (2, 2), 2, "TDL-B", 100, 400, 2),
 }
 
-# Reference SNR (dB) @ 70% throughput from Table 3.
+# Reference SNR (dB) @ 70% throughput from the 5G-IA document Table 3
+# (ideal calibration, average of 8 companies and the 5G-PPP WG result).
 REF_5GPPP = {1: -4.15, 2: 8.6, 3: 10.2, 4: -0.45, 5: 15.45,
              6: -4.15, 7: 8.4, 8: 9.7, 9: -0.1}
 REF_AVG = {1: -4.68, 2: 8.24, 3: 10.48, 4: -0.59, 5: 16.31,
            6: -4.68, 7: 7.97, 8: 10.12, 9: -0.96}
+
+# 3GPP TS 38.104 V16.4.0 PUSCH minimum performance *requirements*
+# (SNR @ 70% throughput). Cases 1-5: Table 8.2.1.2-2 (10 MHz/15 kHz);
+# cases 6-9: Table 8.2.1.2-6 (40 MHz/30 kHz). The matching FRCs are
+# G-FR1-A3 (QPSK R=193/1024 = MCS2), A4 (16QAM R=658/1024 = MCS16),
+# A5 (64QAM R=567/1024 = MCS20); 1-layer for SIMO, 2-layer for 2x2.
+# These are *minimum requirements* (they include implementation margin),
+# so an ideal simulator is expected to sit a few dB below them.
+REF_38104 = {1: -2.5, 2: 10.2, 3: 12.2, 4: 1.7, 5: 18.3,
+             6: -2.5, 7: 10.0, 8: 12.4, 9: 1.3}
 
 # 10 MHz/15 kHz -> 52 PRB; 40 MHz/30 kHz -> 106 PRB (TS 38.101-1 Table 5.3.2-1)
 NRB = {(10, 15): 52, (40, 30): 106}
@@ -83,29 +94,31 @@ def run_case(cid, slots=60):
 
 
 def main():
-    print("=" * 78)
-    print(" 5G-IA Link-Level Calibration — SNR (dB) @ 70% throughput")
-    print("=" * 78)
-    print(f"{'Case':>4} {'config':>26} {'sim':>7} {'5G-PPP':>8} {'avg':>7} "
-          f"{'Δ(WG)':>7} {'Δ(avg)':>7}")
-    print("-" * 78)
-    d_wg, d_avg = [], []
+    print("=" * 86)
+    print(" NR PUSCH calibration — SNR (dB) @ 70% throughput")
+    print(" refs: 5G-IA (ideal, 8-company avg) and 3GPP TS 38.104 (min requirement)")
+    print("=" * 86)
+    print(f"{'Case':>4} {'config':>24} {'sim':>7} {'5GIAavg':>8} {'38.104':>8} "
+          f"{'Δ(5GIA)':>8} {'Δ(104)':>8}")
+    print("-" * 86)
+    d_avg, d_104 = [], []
     for cid in CASES:
         bw, scs, (ntx, nrx), layers, model, ds, dop, mcs = CASES[cid]
         sim_snr = run_case(cid)
-        dw = sim_snr - REF_5GPPP[cid]
         da = sim_snr - REF_AVG[cid]
-        d_wg.append(dw); d_avg.append(da)
+        d1 = sim_snr - REF_38104[cid]
+        d_avg.append(da); d_104.append(d1)
         cfg = f"{ntx}x{nrx} {model} MCS{mcs}"
-        print(f"{cid:>4} {cfg:>26} {sim_snr:7.2f} {REF_5GPPP[cid]:8.2f} "
-              f"{REF_AVG[cid]:7.2f} {dw:+7.2f} {da:+7.2f}")
-    print("-" * 78)
-    d_wg = np.array(d_wg); d_avg = np.array(d_avg)
-    print(f" mean Δ vs 5G-PPP WG = {d_wg.mean():+.2f} dB   "
-          f"RMS = {np.sqrt(np.mean(d_wg**2)):.2f} dB")
-    print(f" mean Δ vs company avg = {d_avg.mean():+.2f} dB   "
-          f"RMS = {np.sqrt(np.mean(d_avg**2)):.2f} dB")
-    print(f" std of Δ (bias-removed spread) = {d_wg.std():.2f} dB")
+        print(f"{cid:>4} {cfg:>24} {sim_snr:7.2f} {REF_AVG[cid]:8.2f} "
+              f"{REF_38104[cid]:8.2f} {da:+8.2f} {d1:+8.2f}")
+    print("-" * 86)
+    d_avg = np.array(d_avg); d_104 = np.array(d_104)
+    print(f" vs 5G-IA ideal:    mean Δ = {d_avg.mean():+.2f} dB, "
+          f"RMS = {np.sqrt(np.mean(d_avg**2)):.2f} dB, "
+          f"bias-removed spread = {d_avg.std():.2f} dB")
+    print(f" vs 3GPP TS 38.104: mean Δ = {d_104.mean():+.2f} dB "
+          f"(sim below the min requirement, as an ideal sim should), "
+          f"spread = {d_104.std():.2f} dB")
 
 
 if __name__ == "__main__":

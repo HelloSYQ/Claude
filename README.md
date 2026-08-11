@@ -166,14 +166,19 @@ SE = delivered_information_bits / (num_slots · slot_duration) / occupied_bandwi
 
 ## Calibration against 3GPP / 5G-IA
 
-`examples/calibration_5gia.py` reproduces the **5G-IA link-level calibration**
-cases (SNR at 70 % throughput, 3GPP RAN4 FR1/FDD) and compares to the published
-company results. The simulator tracks the case-to-case behaviour to within
-**~0.9 dB** (bias-removed) across QPSK/16QAM/64QAM, TDL-A/B/C and SIMO/2×2 MIMO,
-with a consistent ~1.5 dB optimistic bias from the MIESM coding-gap abstraction.
-See [`docs/calibration.md`](docs/calibration.md) for the full table and
-analysis. This exercise also surfaced and fixed a transmit-power normalization
-bug (each layer had received full power; now total power is split across layers,
+`examples/calibration_5gia.py` cross-checks the simulator (SNR at 70 %
+throughput, 3GPP RAN4 FR1/FDD) against **two independent published references**:
+the **5G-IA link-level calibration** (ideal, 8-company average) and the **3GPP
+TS 38.104** PUSCH minimum performance requirements (FRCs G-FR1-A3/A4/A5, which
+map exactly onto MCS 2/16/20). The simulator tracks case-to-case behaviour to
+within **~0.65 dB** (bias-removed) across QPSK/16QAM/64QAM, TDL-A/B/C, SIMO and
+2×2 MIMO, and two bandwidths — sitting ~1.3 dB below the ideal calibration
+(MIESM coding-gap optimism) and ~3.4 dB below the conformance requirement (that
+gap = coding-gap optimism + the ~2 dB implementation margin the requirement
+builds in, exactly as an ideal simulator should). See
+[`docs/calibration.md`](docs/calibration.md) for the full table and analysis.
+This exercise also surfaced and fixed a transmit-power normalization bug (each
+layer had received full power; now total power is split across layers,
 SNR = total Es/N0).
 
 ## Tests
