@@ -14,3 +14,4 @@ results/se_results.json
 !results/compare_se.png
 !results/waveform_impairments.png
 dist/
+nrdlsim/_cache/

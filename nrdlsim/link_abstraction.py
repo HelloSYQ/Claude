@@ -19,15 +19,30 @@ efficiency curves; a bit-true LDPC path is available separately in ``ldpc.py``.
 
 from __future__ import annotations
 
+import os
 import numpy as np
 from functools import lru_cache
 
 from .modulation import _build_constellation
 
+_CACHE_DIR = os.path.join(os.path.dirname(__file__), "_cache")
+
 
 @lru_cache(maxsize=None)
 def _bicm_table(qm: int, n_snr: int = 121):
-    """Precompute BICM capacity (bits/symbol) vs SNR (dB) for a modulation."""
+    """BICM capacity (bits/symbol) vs SNR (dB) for a modulation.
+
+    The Monte-Carlo build is ~1 s per modulation; the result is deterministic
+    (fixed seed) so it is cached both in-process (lru_cache) and on disk, making
+    repeat process invocations start instantly.
+    """
+    cache_file = os.path.join(_CACHE_DIR, f"bicm_qm{qm}_{n_snr}.npz")
+    if os.path.exists(cache_file):
+        try:
+            d = np.load(cache_file)
+            return d["snr_db"], d["cap"]
+        except Exception:
+            pass
     snr_db = np.linspace(-20, 40, n_snr)
     const = _build_constellation(qm)
     labels = np.array([[(s >> (qm - 1 - i)) & 1 for i in range(qm)]
@@ -58,6 +73,11 @@ def _bicm_table(qm: int, n_snr: int = 121):
             s = 1 - 2 * sent
             total += 1 - np.mean(np.log2(1 + np.exp(-s * llr)))
         cap[si] = total
+    try:
+        os.makedirs(_CACHE_DIR, exist_ok=True)
+        np.savez(cache_file, snr_db=snr_db, cap=cap)
+    except Exception:
+        pass
     return snr_db, cap
 
 

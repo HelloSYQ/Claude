@@ -12,6 +12,26 @@ from __future__ import annotations
 import numpy as np
 
 
+def batch_mmse_sinr(H_eff: np.ndarray, noise_var: float) -> np.ndarray:
+    """Post-MMSE per-layer SINR for a stack of effective channels.
+
+    H_eff: [..., n_rx, n_layers] (batched over resource blocks / REs).
+    Returns SINR [..., n_layers] (linear).  Vectorised equivalent of a per-RB
+    ``mmse_equalize`` loop — uses batched matrix ops so the whole allocation is
+    processed in a handful of BLAS calls.
+    """
+    n_layers = H_eff.shape[-1]
+    Hh = np.conj(np.swapaxes(H_eff, -1, -2))          # [..., nl, nrx]
+    A = Hh @ H_eff + noise_var * np.eye(n_layers)     # [..., nl, nl]
+    G = np.linalg.solve(A, Hh)                        # (H^H H + N0 I)^-1 H^H
+    GH = G @ H_eff                                    # [..., nl, nl]
+    diag = np.abs(np.diagonal(GH, axis1=-2, axis2=-1)) ** 2       # signal
+    total = np.sum(np.abs(GH) ** 2, axis=-1)          # signal + interference
+    interf = total - diag
+    noise = noise_var * np.sum(np.abs(G) ** 2, axis=-1)
+    return diag / (interf + noise + 1e-12)
+
+
 def mmse_equalize(y: np.ndarray, H_eff: np.ndarray, noise_var: float):
     """MMSE equalise one RE.
 
@@ -45,14 +65,9 @@ def per_re_sinr(H_freq: np.ndarray, W: np.ndarray, noise_var: float,
     re_to_sc: subcarrier index of each data RE.  Returns flat SINR array
     of length len(re_to_sc)*n_layers (linear).
     """
-    n_layers = W.shape[2]
-    out = np.empty((len(re_to_sc), n_layers))
-    # cache per unique subcarrier
-    for i, sc in enumerate(re_to_sc):
-        H_eff = H_freq[sc] @ W[sc]
-        _, sinr = mmse_equalize(np.zeros(H_eff.shape[0]), H_eff, noise_var)
-        out[i] = sinr
-    return out.reshape(-1)
+    # batched effective channel H_eff[sc] = H_freq[sc] @ W[sc]
+    H_eff = H_freq[re_to_sc] @ W[re_to_sc]            # [n, n_rx, n_layers]
+    return batch_mmse_sinr(H_eff, noise_var).reshape(-1)
 
 
 def estimate_channel_from_dmrs(H_true: np.ndarray, noise_var: float,

@@ -21,6 +21,7 @@ import numpy as np
 from . import mcs_tables
 from .link_abstraction import effective_sinr_miesm, bicm_capacity
 from .layer_mapping import svd_precoder
+from .receiver import batch_mmse_sinr
 
 
 @dataclass
@@ -65,11 +66,9 @@ def compute_csi(H_freq: np.ndarray, noise_var: float, max_rank: int,
     best_tput = -1.0
     for rank in range(1, max_rank + 1):
         W = svd_precoder(H_freq, rank)
-        sinrs = []
-        for f in range(n_f):
-            H_eff = H_freq[f] @ W[f]
-            sinrs.append(_mmse_layer_sinr(H_eff, noise_var))
-        sinrs = np.concatenate(sinrs)
+        # batched post-MMSE SINR across all RBs at once
+        H_eff = H_freq @ W                      # [n_f, n_rx, rank]
+        sinrs = batch_mmse_sinr(H_eff, noise_var).reshape(-1)
         # choose a representative modulation order for compression (64QAM)
         eff_db = effective_sinr_miesm(sinrs, qm=6)
         cqi = _sinr_to_cqi(eff_db, cqi_table, target_bler)
@@ -81,18 +80,29 @@ def compute_csi(H_freq: np.ndarray, noise_var: float, max_rank: int,
     return best
 
 
-def _sinr_to_cqi(eff_sinr_db: float, cqi_table: int, target_bler: float) -> int:
-    """Highest CQI whose required SNR (for target BLER) <= effective SINR."""
-    best = 0
+from functools import lru_cache
+
+
+@lru_cache(maxsize=None)
+def _cqi_required_snr(cqi_table: int, target_bler: float):
+    """Required effective SINR (dB) per CQI index — computed once and cached."""
+    from .link_abstraction import required_snr_db
+    margin = 0.5 * np.log10(0.1 / max(target_bler, 1e-3) + 1.0)
+    reqs = []
     for cqi in range(1, 16):
         qm, rate, _ = mcs_tables.get_cqi(cqi, cqi_table)
-        # required SNR for this CQI at the BLER target (capacity + margin)
-        from .link_abstraction import required_snr_db
-        req = required_snr_db(qm, rate) + 1.0 + 0.6 * rate
-        # add margin for the BLER target (0.1 target ~ small back-off)
-        margin = 0.5 * np.log10(0.1 / max(target_bler, 1e-3) + 1.0)
-        if eff_sinr_db >= req + margin:
-            best = cqi
+        reqs.append(required_snr_db(qm, rate) + 1.0 + 0.6 * rate + margin)
+    return np.array(reqs)
+
+
+def _sinr_to_cqi(eff_sinr_db: float, cqi_table: int, target_bler: float) -> int:
+    """Highest CQI whose required SNR (for target BLER) <= effective SINR."""
+    reqs = _cqi_required_snr(cqi_table, target_bler)
+    # CQIs must be satisfied contiguously from index 1 upward
+    best = 0
+    for i in range(len(reqs)):
+        if eff_sinr_db >= reqs[i]:
+            best = i + 1
         else:
             break
     return best

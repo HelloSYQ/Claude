@@ -50,13 +50,10 @@ def svd_precoder(H_freq: np.ndarray, num_layers: int) -> np.ndarray:
     Uses the right singular vectors associated with the strongest singular
     values (eigen-beamforming, the closed-loop ideal-CSI precoder).
     """
-    n_f, n_rx, n_tx = H_freq.shape
-    W = np.zeros((n_f, n_tx, num_layers), dtype=complex)
-    for f in range(n_f):
-        _, _, vh = np.linalg.svd(H_freq[f])
-        v = vh.conj().T                    # columns are right singular vectors
-        W[f] = v[:, :num_layers]
-    return W
+    # batched SVD over all subcarriers/RBs at once
+    _, _, vh = np.linalg.svd(H_freq, full_matrices=False)   # vh: [n_f, k, n_tx]
+    v = np.conj(np.swapaxes(vh, -1, -2))                    # [n_f, n_tx, k]
+    return v[:, :, :num_layers]
 
 
 def apply_precoding(layer_symbols: np.ndarray, W: np.ndarray) -> np.ndarray:
