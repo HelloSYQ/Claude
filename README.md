@@ -75,6 +75,23 @@ simulator offers two paths, selected by `fec_mode`:
 
 ---
 
+## Guided tour (Jupyter notebook)
+
+For a comprehensive, runnable walkthrough of **every module** — with a live demo
+and plot for each (constellations, channel PDP/frequency response, CDL angular
+map and antenna pattern, BICM capacity, OFDM CFO/timing, a full SE curve, and
+the calibration) — open:
+
+**[`notebooks/NR_Downlink_Simulator_Guide.ipynb`](notebooks/NR_Downlink_Simulator_Guide.ipynb)**
+
+It renders with outputs directly on GitHub. To re-execute it locally:
+
+```bash
+jupyter nbconvert --to notebook --execute --inplace \
+    notebooks/NR_Downlink_Simulator_Guide.ipynb
+# or regenerate from source: python notebooks/build_guide.py
+```
+
 ## Installation
 
 ```bash
