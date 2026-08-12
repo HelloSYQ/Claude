@@ -114,6 +114,8 @@ def main():
     p.add_argument("--ideal-csi", action="store_true",
                    help="perfect channel estimation at the receiver")
     p.add_argument("--seed", type=int, default=2025)
+    p.add_argument("--jobs", type=int, default=1,
+                   help="parallel worker processes for the SNR sweep (-1 = all cores)")
     p.add_argument("--plot", action="store_true")
     p.add_argument("--out", default="results/se_results.json")
     args = p.parse_args()
@@ -139,13 +141,20 @@ def main():
     print(header)
     print("-" * 78)
 
-    results = []
-    for i, snr in enumerate(np.arange(*_range_args(args.snr))):
-        r = sim.run_point(float(snr), snr_seed=i)
-        results.append(r)
-        print(f"{r.snr_db:8.2f} {r.spectral_efficiency:12.4f} "
-              f"{r.throughput_bps/1e6:12.3f} {r.bler:8.3f} "
-              f"{r.avg_mcs:8.2f} {r.avg_rank:8.2f} {r.avg_cqi:8.2f}")
+    if args.jobs == 1:
+        results = []
+        for i, snr in enumerate(np.arange(*_range_args(args.snr))):
+            r = sim.run_point(float(snr), snr_seed=i)
+            results.append(r)
+            print(f"{r.snr_db:8.2f} {r.spectral_efficiency:12.4f} "
+                  f"{r.throughput_bps/1e6:12.3f} {r.bler:8.3f} "
+                  f"{r.avg_mcs:8.2f} {r.avg_rank:8.2f} {r.avg_cqi:8.2f}")
+    else:
+        results = sim.run(n_jobs=args.jobs)
+        for r in results:
+            print(f"{r.snr_db:8.2f} {r.spectral_efficiency:12.4f} "
+                  f"{r.throughput_bps/1e6:12.3f} {r.bler:8.3f} "
+                  f"{r.avg_mcs:8.2f} {r.avg_rank:8.2f} {r.avg_cqi:8.2f}")
 
     print("-" * 78)
     peak = max(results, key=lambda x: x.spectral_efficiency)

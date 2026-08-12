@@ -20,6 +20,8 @@ Two FEC modes:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from concurrent.futures import ProcessPoolExecutor
+import os
 import numpy as np
 
 from .config import SimConfig
@@ -27,7 +29,7 @@ from . import mcs_tables
 from . import tbs as tbs_mod
 from . import resource_grid as rg
 from .channel_models import TDLChannel, CDLChannel, awgn_frequency_response
-from .csi import compute_csi, CSIFeedbackChannel
+from .csi import compute_csi, CSIFeedbackChannel, CSIReport
 from .scheduler import Scheduler
 from .layer_mapping import svd_precoder
 from .receiver import estimate_channel_from_dmrs, per_re_sinr, mmse_equalize
@@ -133,8 +135,16 @@ class NRDownlinkSimulator:
                 H_est = H_true
             else:
                 H_est = estimate_channel_from_dmrs(H_true, noise_var, rng)
-            report = compute_csi(H_est, noise_var, max_rank,
-                                 c.pdsch.mcs_table, c.pdsch.target_bler)
+            if c.link_adaptation:
+                report = compute_csi(H_est, noise_var, max_rank,
+                                     c.pdsch.mcs_table, c.pdsch.target_bler)
+            else:
+                # fixed MCS: the rank/CQI search is unused; only a precoder is
+                # needed, and only in closed-loop (SVD) mode.
+                fixed_rank = max(1, min(c.pdsch.num_layers, max_rank))
+                W_rep = (None if c.precoding == "none"
+                         else svd_precoder(H_est, fixed_rank))
+                report = CSIReport(fixed_rank, 0, W_rep, 0.0)
             csi_fb.push(report)
             active_csi = csi_fb.get()
 
@@ -259,11 +269,23 @@ class NRDownlinkSimulator:
         return ok
 
     # ------------------------------------------------------------------
-    def run(self):
+    def run(self, n_jobs: int = 1):
+        """Sweep the configured SNR range.
+
+        ``n_jobs`` > 1 (or -1 for all cores) runs the SNR points in parallel
+        processes — each point is independent, so this scales near-linearly.
+        """
         start, stop, step = self.cfg.snr_db_range
         snrs = np.arange(start, stop + 1e-9, step)
-        results = []
-        for i, snr in enumerate(snrs):
-            res = self.run_point(float(snr), snr_seed=i)
-            results.append(res)
-        return results
+        if n_jobs == 1 or len(snrs) <= 1:
+            return [self.run_point(float(s), i) for i, s in enumerate(snrs)]
+        workers = os.cpu_count() if n_jobs in (-1, None) else n_jobs
+        tasks = [(self.cfg, float(s), i) for i, s in enumerate(snrs)]
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            return list(ex.map(_run_point_worker, tasks))
+
+
+def _run_point_worker(args):
+    """Top-level worker for parallel SNR sweeps (picklable)."""
+    cfg, snr_db, seed = args
+    return NRDownlinkSimulator(cfg).run_point(snr_db, seed)

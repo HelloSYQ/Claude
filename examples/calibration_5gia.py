@@ -14,6 +14,7 @@ SNR where throughput reaches 70% of its high-SNR ceiling, then compare to the
 import os
 import sys
 import numpy as np
+from concurrent.futures import ProcessPoolExecutor
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -101,10 +102,13 @@ def main():
     print(f"{'Case':>4} {'config':>24} {'sim':>7} {'5GIAavg':>8} {'38.104':>8} "
           f"{'Δ(5GIA)':>8} {'Δ(104)':>8}")
     print("-" * 86)
+    # the 9 cases are independent -> run them in parallel processes
+    with ProcessPoolExecutor(max_workers=min(len(CASES), os.cpu_count() or 1)) as ex:
+        sim_snrs = dict(zip(CASES, ex.map(run_case, list(CASES))))
     d_avg, d_104 = [], []
     for cid in CASES:
         bw, scs, (ntx, nrx), layers, model, ds, dop, mcs = CASES[cid]
-        sim_snr = run_case(cid)
+        sim_snr = sim_snrs[cid]
         da = sim_snr - REF_AVG[cid]
         d1 = sim_snr - REF_38104[cid]
         d_avg.append(da); d_104.append(d1)
