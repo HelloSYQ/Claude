@@ -16,3 +16,4 @@ results/se_results.json
 dist/
 nrdlsim/_cache/
 notebooks/*.html
+!results/cdl_antenna_geometry.png
