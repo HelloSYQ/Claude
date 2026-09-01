@@ -62,12 +62,13 @@ class NRDownlinkSimulator:
         model = c.channel.model
         if model.upper() == "AWGN":
             return None, rng
+        fd = c.channel.effective_max_doppler_hz     # from UE speed if given
         if model.upper().startswith("CDL"):
             a = c.antenna
             chan = CDLChannel(
                 model=model,
                 delay_spread_ns=c.channel.delay_spread_ns,
-                max_doppler_hz=c.channel.max_doppler_hz,
+                max_doppler_hz=fd,
                 n_tx=a.n_tx, n_rx=a.n_rx,
                 carrier_freq_hz=c.channel.carrier_freq_hz,
                 tx_pol=a.tx_pol, rx_pol=a.rx_pol,
@@ -80,12 +81,14 @@ class NRDownlinkSimulator:
                 element_max_gain_dbi=a.element_max_gain_dbi,
                 element_hpbw_deg=a.element_hpbw_deg,
                 element_front_back_db=a.element_front_back_db,
+                travel_az_deg=c.channel.travel_az_deg,
+                travel_zen_deg=c.channel.travel_zen_deg,
                 rng=rng)
             return chan, rng
         chan = TDLChannel(
             model=model,
             delay_spread_ns=c.channel.delay_spread_ns,
-            max_doppler_hz=c.channel.max_doppler_hz,
+            max_doppler_hz=fd,
             n_tx=c.antenna.n_tx, n_rx=c.antenna.n_rx,
             correlation=c.antenna.correlation,
             sample_rate_hz=c.carrier.subcarrier_spacing_hz * c.carrier.n_subcarriers,

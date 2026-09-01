@@ -45,7 +45,10 @@ def build_config(args) -> SimConfig:
                             element_max_gain_dbi=args.element_gain)
     channel = ChannelConfig(model=args.model, delay_spread_ns=args.ds,
                             max_doppler_hz=args.doppler,
-                            carrier_freq_hz=args.fc)
+                            carrier_freq_hz=args.fc,
+                            ue_speed_kmh=args.speed,
+                            travel_az_deg=args.travel_az,
+                            travel_zen_deg=args.travel_zen)
     harq = HARQConfig(enabled=not args.no_harq)
     return SimConfig(
         carrier=carrier, pdsch=pdsch, antenna=antenna, channel=channel,
@@ -100,6 +103,12 @@ def main():
                    help="channel model: TDL-A..E, CDL-A..E or AWGN")
     p.add_argument("--ds", type=float, default=100.0, help="delay spread (ns)")
     p.add_argument("--doppler", type=float, default=100.0, help="max Doppler (Hz)")
+    p.add_argument("--speed", type=float, default=None,
+                   help="UE speed (km/h); overrides --doppler via f_d = v*fc/c")
+    p.add_argument("--travel-az", type=float, default=0.0,
+                   help="UE direction of travel, azimuth (deg)")
+    p.add_argument("--travel-zen", type=float, default=90.0,
+                   help="UE direction of travel, zenith (deg; 90 = horizontal)")
     p.add_argument("--fc", type=float, default=3.5e9, help="carrier freq (Hz)")
     p.add_argument("--snr", type=float, nargs=3, default=[-5.0, 30.0, 2.5],
                    metavar=("START", "STOP", "STEP"))
@@ -130,8 +139,10 @@ def main():
           f"RB={cfg.carrier.n_size_grid}  BW={cfg.carrier.occupied_bandwidth_hz/1e6:.2f} MHz")
     print(f" MIMO {cfg.antenna.n_tx}x{cfg.antenna.n_rx} ({cfg.antenna.correlation} corr)  "
           f"max rank={min(cfg.antenna.n_tx, cfg.antenna.n_rx)}")
+    _spd = (f"  speed={cfg.channel.ue_speed_kmh} km/h"
+            if cfg.channel.ue_speed_kmh is not None else "")
     print(f" Channel: {cfg.channel.model}  DS={cfg.channel.delay_spread_ns} ns  "
-          f"Doppler={cfg.channel.max_doppler_hz} Hz")
+          f"Doppler={cfg.channel.effective_max_doppler_hz:.1f} Hz{_spd}")
     print(f" MCS table {cfg.pdsch.mcs_table}  link-adaptation="
           f"{cfg.link_adaptation}  HARQ={cfg.harq.enabled}  FEC={cfg.fec_mode}")
     print(f" Slots/point={cfg.num_slots}  CSI delay={cfg.csi_feedback_delay_slots} slots")

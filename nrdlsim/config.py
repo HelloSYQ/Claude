@@ -128,13 +128,30 @@ class AntennaConfig:
 
 @dataclass
 class ChannelConfig:
-    """NR channel model configuration (TR 38.901)."""
+    """NR channel model configuration (TR 38.901).
 
-    model: str = "TDL-C"                # TDL-A..E or 'AWGN'
+    UE mobility can be specified either directly as ``max_doppler_hz`` or, more
+    physically, as ``ue_speed_kmh`` together with the direction of travel
+    (``travel_az_deg`` / ``travel_zen_deg``).  When a speed is given it takes
+    precedence: the maximum Doppler is derived as f_d = v * f_c / c.
+    """
+
+    model: str = "TDL-C"                # TDL-A..E, CDL-A..E or 'AWGN'
     delay_spread_ns: float = 100.0      # desired RMS delay spread
-    max_doppler_hz: float = 100.0       # maximum Doppler shift
+    max_doppler_hz: float = 100.0       # maximum Doppler shift (used if no speed)
     carrier_freq_hz: float = 3.5e9      # carrier frequency
+    ue_speed_kmh: Optional[float] = None  # UE speed; if set, derives f_d
+    travel_az_deg: float = 0.0          # UE direction of travel (azimuth)
+    travel_zen_deg: float = 90.0        # UE direction of travel (zenith; 90 = horizontal)
     seed: Optional[int] = None
+
+    @property
+    def effective_max_doppler_hz(self) -> float:
+        """Maximum Doppler in Hz: from UE speed if given, else max_doppler_hz."""
+        if self.ue_speed_kmh is not None:
+            v_ms = self.ue_speed_kmh / 3.6
+            return v_ms * self.carrier_freq_hz / 3e8
+        return self.max_doppler_hz
 
 
 @dataclass
