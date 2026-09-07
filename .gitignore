@@ -18,3 +18,4 @@ nrdlsim/_cache/
 notebooks/*.html
 !results/cdl_antenna_geometry.png
 !results/codeword_mapping_study.png
+!results/codeword_mapping_olla.png
