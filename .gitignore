@@ -19,3 +19,4 @@ notebooks/*.html
 !results/cdl_antenna_geometry.png
 !results/codeword_mapping_study.png
 !results/codeword_mapping_olla.png
+!results/sv_distribution_32t8r.png
