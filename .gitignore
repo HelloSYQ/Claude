@@ -20,3 +20,4 @@ notebooks/*.html
 !results/codeword_mapping_study.png
 !results/codeword_mapping_olla.png
 !results/sv_distribution_32t8r.png
+!results/sv_distribution_ds30.png
