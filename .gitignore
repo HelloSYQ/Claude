@@ -22,3 +22,4 @@ notebooks/*.html
 !results/sv_distribution_32t8r.png
 !results/sv_distribution_ds30.png
 !results/olla_convergence.png
+!results/sv_upper6ghz.png
