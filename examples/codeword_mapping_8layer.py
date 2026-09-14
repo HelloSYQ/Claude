@@ -75,22 +75,21 @@ def make_ut_channel(seed, orient_rng):
                       rng=np.random.default_rng(seed))
 
 
-def run_point(snr_db, n_slots=120, base=0):
+def run_point(snr_db, n_slots=120, base=0, fixed_rank=None):
     nv = 10 ** (-snr_db / 10.0)
     freqs = (np.arange(N_RB) - N_RB / 2) * 12 * SCS
     orient_rng = np.random.default_rng(555 + int(snr_db))
     bits = {2: 0.0, 4: 0.0}
     rank_sum = {2: 0, 4: 0}
+    ranks = [fixed_rank] if fixed_rank else list(range(1, MAX_RANK + 1))
     for s in range(n_slots):
         H = make_ut_channel(base + s, orient_rng).frequency_response(freqs, 0.0)
         _, _, vh = np.linalg.svd(H, full_matrices=False)
         V = np.conj(np.swapaxes(vh, -1, -2))                 # [n_rb, 32, 8]
-        per_rank = {}
-        for r in range(1, MAX_RANK + 1):
-            Wr = V[:, :, :r] / np.sqrt(r)
-            per_rank[r] = batch_mmse_sinr(H @ Wr, nv)        # [n_rb, r]
+        per_rank = {r: batch_mmse_sinr(H @ (V[:, :, :r] / np.sqrt(r)), nv)
+                    for r in ranks}
         for ncw in (2, 4):
-            best_r, best_tp = 1, -1.0
+            best_r, best_tp = ranks[0], -1.0
             for r, sinr in per_rank.items():
                 tp = scheme_throughput(sinr, ncw)
                 if tp > best_tp:
@@ -103,13 +102,22 @@ def run_point(snr_db, n_slots=120, base=0):
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--fixed-rank", type=int, default=None,
+                    help="force this rank every slot (e.g. 8); default = adaptive")
+    args = ap.parse_args()
+    fr = args.fixed_rank
+    tag = f"fixed rank {fr}" if fr else "up to 8 layers (adaptive)"
+    suffix = f"_fixed{fr}" if fr else ""
+
     snrs = np.arange(-5, 31, 2.5)
     se2, se4, rk2, rk4 = [], [], [], []
-    print("32T8R UT CDL-C DS=30ns, upper 6 GHz -- 2 CW vs 4 CW (up to 8 layers)")
+    print(f"32T8R UT CDL-C DS=30ns, upper 6 GHz -- 2 CW vs 4 CW ({tag})")
     print(f"{'SNR':>6} {'SE 2CW':>8} {'SE 4CW':>8} {'gain%':>7} "
           f"{'rank2':>6} {'rank4':>6}")
     for snr in snrs:
-        se, rk = run_point(float(snr))
+        se, rk = run_point(float(snr), fixed_rank=fr)
         se2.append(se[2]); se4.append(se[4]); rk2.append(rk[2]); rk4.append(rk[4])
         g = (se[4] / se[2] - 1) * 100 if se[2] > 0 else 0
         print(f"{snr:6.1f} {se[2]:8.3f} {se[4]:8.3f} {g:6.1f} "
@@ -119,7 +127,7 @@ def main():
     ax[0].plot(snrs, se2, "o-", color="#2563eb", label="2 codewords (NR rank5-8)")
     ax[0].plot(snrs, se4, "s-", color="#dc2626", label="4 codewords")
     ax[0].set_xlabel("SNR (dB)"); ax[0].set_ylabel("spectral efficiency (b/s/Hz)")
-    ax[0].set_title("2 CW vs 4 CW up to 8 layers (32T8R UT CDL-C)")
+    ax[0].set_title(f"2 CW vs 4 CW, {tag} (32T8R UT CDL-C)")
     ax[0].grid(alpha=0.3); ax[0].legend()
     gain = [(a / b - 1) * 100 for a, b in zip(se4, se2)]
     ax[1].plot(snrs, gain, "^-", color="#16a34a")
@@ -128,8 +136,9 @@ def main():
     ax[1].set_title("4-CW advantage vs SNR"); ax[1].grid(alpha=0.3)
     fig.tight_layout()
     os.makedirs("results", exist_ok=True)
-    fig.savefig("results/codeword_mapping_8layer.png", dpi=130)
-    print("saved results/codeword_mapping_8layer.png")
+    out = f"results/codeword_mapping_8layer{suffix}.png"
+    fig.savefig(out, dpi=130)
+    print("saved", out)
 
 
 if __name__ == "__main__":
