@@ -24,3 +24,4 @@ notebooks/*.html
 !results/olla_convergence.png
 !results/sv_upper6ghz.png
 !results/codeword_mapping_ut.png
+!results/codeword_mapping_8layer.png
