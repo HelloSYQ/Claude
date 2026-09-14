@@ -26,3 +26,4 @@ notebooks/*.html
 !results/codeword_mapping_ut.png
 !results/codeword_mapping_8layer.png
 !results/codeword_mapping_8layer_fixed8.png
+!results/codeword_mapping_rank_compare.png
