@@ -10,8 +10,9 @@ from __future__ import annotations
 import numpy as np
 
 # Normalisation factors 1/sqrt(mean power) per TS 38.211 5.1.
+# 1024QAM (Qm=10) extends the same square-QAM construction: mean power = 682.
 _NORM = {2: 1 / np.sqrt(2), 4: 1 / np.sqrt(10), 6: 1 / np.sqrt(42),
-         8: 1 / np.sqrt(170)}
+         8: 1 / np.sqrt(170), 10: 1 / np.sqrt(682)}
 
 
 def _build_constellation(qm: int) -> np.ndarray:

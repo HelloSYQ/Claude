@@ -40,7 +40,15 @@ MCS_TABLE_3 = [
     (6, 466), (6, 517), (6, 567), (6, 616), (6, 666), (6, 719), (6, 772),
 ]
 
-_MCS_TABLES = {1: MCS_TABLE_1, 2: MCS_TABLE_2, 3: MCS_TABLE_3}
+# MCS Table 4: 256QAM table extended with 1024QAM (Qm=10) at the top, giving
+# the strongest layers headroom above 256QAM at high SINR. The 1024QAM rows are
+# an illustrative extension (code rates continuing the 256QAM progression), not
+# the exact 3GPP Rel-17 Table 5.1.3.1-4 values.
+MCS_TABLE_4 = MCS_TABLE_2 + [
+    (10, 754), (10, 797), (10, 841), (10, 885), (10, 916.5), (10, 948),
+]
+
+_MCS_TABLES = {1: MCS_TABLE_1, 2: MCS_TABLE_2, 3: MCS_TABLE_3, 4: MCS_TABLE_4}
 
 # ---------------------------------------------------------------------------
 # CQI tables: index -> (Qm, R x 1024, spectral efficiency)
@@ -78,7 +86,7 @@ class MCSInfo:
     spectral_efficiency: float  # Qm * R (bits/RE, before overhead)
 
 
-_MOD_NAME = {2: "QPSK", 4: "16QAM", 6: "64QAM", 8: "256QAM"}
+_MOD_NAME = {2: "QPSK", 4: "16QAM", 6: "64QAM", 8: "256QAM", 10: "1024QAM"}
 
 
 def get_mcs(index: int, table: int = 2) -> MCSInfo:
