@@ -1,8 +1,9 @@
 """QAM modulation and soft (LLR) demodulation per TS 38.211 clause 5.1.
 
 Supports QPSK (Qm=2), 16QAM (Qm=4), 64QAM (Qm=6) and 256QAM (Qm=8) using
-the Gray-mapped constellations defined in the specification.  Constellations
-are normalised to unit average energy.
+the Gray-mapped constellations defined in the specification, plus 1024QAM
+(Qm=10) built the same way.  Constellations are normalised to unit average
+energy.
 """
 
 from __future__ import annotations
