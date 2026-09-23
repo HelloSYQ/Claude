@@ -20,9 +20,15 @@ _TBS_TABLE = [
 ]
 
 
-def _ceil_pow2_quant(n_info: float) -> int:
+def _floor_pow2_quant(n_info: float) -> int:
+    """N'_info = 2^n * floor(N_info / 2^n), n = max(3, floor(log2 N_info) - 6)."""
     n = max(3, math.floor(math.log2(n_info)) - 6)
-    return int(2 ** n * round(n_info / (2 ** n)))
+    return int(2 ** n * math.floor(n_info / (2 ** n)))
+
+
+def _round_half_up(x: float) -> int:
+    # the spec's round(); Python's round() is round-half-to-even
+    return math.floor(x + 0.5)
 
 
 def re_per_rb(n_pdsch_symbols: int, n_dmrs_re_per_rb: int, n_oh: int) -> int:
@@ -38,7 +44,7 @@ def compute_tbs(n_re_per_rb: int, n_prb: int, qm: int, code_rate: float,
     n_info = n_re * code_rate * qm * num_layers
 
     if n_info <= 3824:
-        n_info_q = max(24, _ceil_pow2_quant(n_info))
+        n_info_q = max(24, _floor_pow2_quant(n_info))
         # find smallest TBS >= n_info_q
         for tbs in _TBS_TABLE:
             if tbs >= n_info_q:
@@ -47,7 +53,7 @@ def compute_tbs(n_re_per_rb: int, n_prb: int, qm: int, code_rate: float,
 
     # N_info > 3824
     n = math.floor(math.log2(n_info - 24)) - 5
-    n_info_q = max(3840, 2 ** n * round((n_info - 24) / (2 ** n)))
+    n_info_q = max(3840, 2 ** n * _round_half_up((n_info - 24) / (2 ** n)))
 
     if code_rate <= 0.25:
         c = math.ceil((n_info_q + 24) / 3816)

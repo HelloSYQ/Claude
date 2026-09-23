@@ -348,7 +348,7 @@ for a in acks:
     sched.update_olla(a); offsets.append(sched.olla_offset)
 plt.figure(figsize=(8,3.2))
 plt.plot(offsets, marker="o", ms=3)
-plt.xlabel("HARQ feedback #"); plt.ylabel("OLLA back-off (eff units)")
+plt.xlabel("HARQ feedback #"); plt.ylabel("OLLA back-off (dB)")
 plt.title("OLLA backs off on NACKs, relaxes on ACKs"); plt.show()
 """)
 

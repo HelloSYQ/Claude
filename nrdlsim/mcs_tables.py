@@ -5,6 +5,7 @@
 - MCS Table 3  : TS 38.214 Table 5.1.3.1-3  (low spectral efficiency / URLLC)
 - CQI Table 1  : TS 38.214 Table 5.2.2.1-2  (up to 64QAM)
 - CQI Table 2  : TS 38.214 Table 5.2.2.1-3  (up to 256QAM)
+- MCS Table 4 / CQI Table 4 : 1024QAM extensions (illustrative, see below)
 
 Each MCS entry is (modulation order Qm, target code rate x1024).
 Each CQI entry is (modulation order Qm, target code rate x1024, spectral eff).
@@ -71,10 +72,22 @@ CQI_TABLE_2 = [
     (8, 797, 6.2266), (8, 885, 6.9141), (8, 948, 7.4063),
 ]
 
-_CQI_TABLES = {1: CQI_TABLE_1, 2: CQI_TABLE_2}
+# CQI Table 4: 1024QAM CQI table paired with MCS table 4. Follows the structure
+# of the Rel-17 table (TS 38.214 Table 5.2.2.1-5); like MCS_TABLE_4, treat the
+# values as illustrative until checked against the spec.
+CQI_TABLE_4 = [
+    (0, 0, 0.0),
+    (2, 78, 0.1523), (2, 193, 0.3770), (2, 449, 0.8770), (4, 378, 1.4766),
+    (4, 616, 2.4063), (6, 567, 3.3223), (6, 666, 3.9023), (6, 772, 4.5234),
+    (6, 873, 5.1152), (8, 711, 5.5547), (8, 797, 6.2266), (8, 885, 6.9141),
+    (8, 948, 7.4063), (10, 853, 8.3301), (10, 948, 9.2578),
+]
+
+# Keys follow the spec numbering (CQI Table 3, low-SE, is not implemented).
+_CQI_TABLES = {1: CQI_TABLE_1, 2: CQI_TABLE_2, 4: CQI_TABLE_4}
 
 # Map MCS table -> associated CQI table for link adaptation.
-MCS_TO_CQI_TABLE = {1: 1, 2: 2, 3: 1}
+MCS_TO_CQI_TABLE = {1: 1, 2: 2, 3: 1, 4: 4}
 
 
 @dataclass

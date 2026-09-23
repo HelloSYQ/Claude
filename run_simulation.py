@@ -71,7 +71,8 @@ def main():
     p.add_argument("--symbols", type=int, default=13, help="PDSCH OFDM symbols")
     p.add_argument("--layers", type=int, default=2, help="max transmission layers")
     p.add_argument("--mcs", type=int, default=16, help="fixed/initial MCS index")
-    p.add_argument("--mcs-table", type=int, default=2, choices=[1, 2, 3])
+    p.add_argument("--mcs-table", type=int, default=2, choices=[1, 2, 3, 4],
+                   help="1: 64QAM, 2: 256QAM, 3: low-SE, 4: 256QAM + 1024QAM")
     p.add_argument("--ntx", type=int, default=4, help="gNB tx antennas")
     p.add_argument("--nrx", type=int, default=2, help="UE rx antennas")
     p.add_argument("--correlation", default="low",
@@ -132,9 +133,9 @@ def main():
     cfg = build_config(args)
     sim = NRDownlinkSimulator(cfg)
 
-    print("=" * 78)
+    print("=" * 88)
     print(" NR Downlink Link-Level Simulation")
-    print("=" * 78)
+    print("=" * 88)
     print(f" Numerology mu={cfg.carrier.mu}  SCS={cfg.carrier.scs_khz} kHz  "
           f"RB={cfg.carrier.n_size_grid}  BW={cfg.carrier.occupied_bandwidth_hz/1e6:.2f} MHz")
     print(f" MIMO {cfg.antenna.n_tx}x{cfg.antenna.n_rx} ({cfg.antenna.correlation} corr)  "
@@ -146,11 +147,12 @@ def main():
     print(f" MCS table {cfg.pdsch.mcs_table}  link-adaptation="
           f"{cfg.link_adaptation}  HARQ={cfg.harq.enabled}  FEC={cfg.fec_mode}")
     print(f" Slots/point={cfg.num_slots}  CSI delay={cfg.csi_feedback_delay_slots} slots")
-    print("-" * 78)
+    print("-" * 88)
     header = f"{'SNR[dB]':>8} {'SE[b/s/Hz]':>12} {'Tput[Mbps]':>12} " \
-             f"{'BLER':>8} {'avgMCS':>8} {'avgRank':>8} {'avgCQI':>8}"
+             f"{'BLER1st':>8} {'resBLER':>8} {'avgMCS':>8} {'avgRank':>8} " \
+             f"{'avgCQI':>8}"
     print(header)
-    print("-" * 78)
+    print("-" * 88)
 
     if args.jobs == 1:
         results = []
@@ -158,16 +160,16 @@ def main():
             r = sim.run_point(float(snr), snr_seed=i)
             results.append(r)
             print(f"{r.snr_db:8.2f} {r.spectral_efficiency:12.4f} "
-                  f"{r.throughput_bps/1e6:12.3f} {r.bler:8.3f} "
+                  f"{r.throughput_bps/1e6:12.3f} {r.bler:8.3f} {r.residual_bler:8.3f} "
                   f"{r.avg_mcs:8.2f} {r.avg_rank:8.2f} {r.avg_cqi:8.2f}")
     else:
         results = sim.run(n_jobs=args.jobs)
         for r in results:
             print(f"{r.snr_db:8.2f} {r.spectral_efficiency:12.4f} "
-                  f"{r.throughput_bps/1e6:12.3f} {r.bler:8.3f} "
+                  f"{r.throughput_bps/1e6:12.3f} {r.bler:8.3f} {r.residual_bler:8.3f} "
                   f"{r.avg_mcs:8.2f} {r.avg_rank:8.2f} {r.avg_cqi:8.2f}")
 
-    print("-" * 78)
+    print("-" * 88)
     peak = max(results, key=lambda x: x.spectral_efficiency)
     print(f" Peak spectral efficiency: {peak.spectral_efficiency:.4f} b/s/Hz "
           f"at SNR={peak.snr_db:.1f} dB")
@@ -198,6 +200,7 @@ def _save(results, cfg, path):
         "points": [
             {"snr_db": r.snr_db, "se": r.spectral_efficiency,
              "throughput_bps": r.throughput_bps, "bler": r.bler,
+             "residual_bler": r.residual_bler,
              "avg_mcs": r.avg_mcs, "avg_rank": r.avg_rank,
              "avg_cqi": r.avg_cqi}
             for r in results
@@ -223,11 +226,15 @@ def _plot(results, cfg):
                   f"{cfg.antenna.n_tx}x{cfg.antenna.n_rx}")
     ax1.grid(True, alpha=0.3)
 
-    ax2.semilogy(snr, np.clip(bler, 1e-3, 1), "s-", color="#dc2626", lw=2)
+    ax2.semilogy(snr, np.clip(bler, 1e-3, 1), "s-", color="#dc2626", lw=2,
+                 label="initial transmission")
     ax2.axhline(cfg.pdsch.target_bler, ls="--", color="gray",
                 label=f"target {cfg.pdsch.target_bler}")
     ax2.set_xlabel("SNR (dB)"); ax2.set_ylabel("BLER")
-    ax2.set_title("Residual BLER"); ax2.grid(True, which="both", alpha=0.3)
+    ax2.semilogy(snr, np.clip([r.residual_bler for r in results], 1e-3, 1),
+                 "^--", color="#6b7280", lw=1.5, label="residual (after HARQ)")
+    ax2.set_title("BLER: initial transmission vs residual")
+    ax2.grid(True, which="both", alpha=0.3)
     ax2.legend()
 
     fig.tight_layout()

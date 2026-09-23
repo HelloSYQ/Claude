@@ -108,19 +108,33 @@ def required_snr_db(qm: int, code_rate: float) -> float:
     return float(np.interp(target, cap, grid_db))
 
 
-def bler_from_effective_sinr(eff_sinr_db: float, qm: int, code_rate: float,
-                             tb_bits: int) -> float:
-    """NR-LDPC-like BLER waterfall vs effective SINR.
+def _waterfall(qm: int, code_rate: float, tb_bits: int):
+    """(threshold_db, slope_per_db) of the BLER waterfall; BLER = 0.5 at threshold.
 
     The threshold is the capacity-achieving SNR plus a coding gap; the slope
     sharpens with block length (longer LDPC blocks decode more steeply).
     """
-    snr_req = required_snr_db(qm, code_rate)
     # implementation/coding gap of an NR LDPC code from capacity (dB)
     gap = 1.0 + 0.6 * code_rate
-    threshold = snr_req + gap
-    # waterfall slope: sharper for longer blocks
+    threshold = required_snr_db(qm, code_rate) + gap
     slope = 1.2 + 0.25 * np.log2(max(tb_bits, 64) / 64.0)
-    x = slope * (eff_sinr_db - threshold)
-    # logistic waterfall in (0,1)
-    return float(1.0 / (1.0 + np.exp(x)))
+    return threshold, slope
+
+
+def bler_from_effective_sinr(eff_sinr_db: float, qm: int, code_rate: float,
+                             tb_bits: int) -> float:
+    """NR-LDPC-like BLER waterfall vs effective SINR (logistic in (0,1))."""
+    threshold, slope = _waterfall(qm, code_rate, tb_bits)
+    return float(1.0 / (1.0 + np.exp(slope * (eff_sinr_db - threshold))))
+
+
+def required_eff_sinr_db(qm: int, code_rate: float, tb_bits: int,
+                         target_bler: float) -> float:
+    """Effective SINR (dB) at which the waterfall reaches ``target_bler``.
+
+    Exact inverse of :func:`bler_from_effective_sinr`, shared by CQI selection
+    (UE) and MCS selection (gNB) so both operate at the same BLER target.
+    """
+    threshold, slope = _waterfall(qm, code_rate, tb_bits)
+    p = min(max(target_bler, 1e-6), 1 - 1e-6)
+    return float(threshold + np.log((1 - p) / p) / slope)

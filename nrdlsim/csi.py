@@ -14,12 +14,13 @@ acquisition/feedback loop.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from collections import deque
 import numpy as np
 
 from . import mcs_tables
-from .link_abstraction import effective_sinr_miesm, bicm_capacity
+from . import tbs as tbs_mod
+from .link_abstraction import effective_sinr_miesm, required_eff_sinr_db
 from .layer_mapping import svd_precoder
 from .receiver import batch_mmse_sinr
 
@@ -28,8 +29,11 @@ from .receiver import batch_mmse_sinr
 class CSIReport:
     rank: int
     cqi: int
-    precoder: np.ndarray            # W[f, n_tx, rank]
+    precoder: np.ndarray            # W[f, n_tx, rank] (unit-norm columns)
     eff_sinr_db: float
+    # precoders for every evaluated rank, so a HARQ retransmission that must
+    # keep its original rank can still use this (delayed) report's precoder
+    precoders: dict = field(default_factory=dict)
 
 
 def _mmse_layer_sinr(H_eff: np.ndarray, noise_var: float) -> np.ndarray:
@@ -55,28 +59,56 @@ def _mmse_layer_sinr(H_eff: np.ndarray, noise_var: float) -> np.ndarray:
     return sinr
 
 
+# CSI reference resource used when the caller does not supply one:
+# 13 PDSCH symbols minus 12 DM-RS RE per PRB (TS 38.214 5.2.2.5).
+DEFAULT_REF_RE_PER_RB = 144
+
+
 def compute_csi(H_freq: np.ndarray, noise_var: float, max_rank: int,
-                mcs_table: int, target_bler: float = 0.1) -> CSIReport:
-    """Compute the best (rank, precoder, CQI) for the estimated channel."""
+                mcs_table: int, target_bler: float = 0.1,
+                n_re_per_rb: int | None = None,
+                n_rb: int | None = None) -> CSIReport:
+    """Compute the best (rank, precoder, CQI) for the estimated channel.
+
+    ``n_re_per_rb``/``n_rb`` describe the CSI reference resource; they set the
+    TBS, hence the BLER-waterfall slope, used to place each CQI at the target
+    BLER. They default to 144 RE/PRB over ``H_freq.shape[0]`` PRBs.
+    """
     n_f, n_rx, n_tx = H_freq.shape
     max_rank = min(max_rank, n_rx, n_tx)
     cqi_table = mcs_tables.MCS_TO_CQI_TABLE[mcs_table]
+    n_re_per_rb = n_re_per_rb or DEFAULT_REF_RE_PER_RB
+    n_rb = n_rb or n_f
+    qms = sorted({mcs_tables.get_cqi(i, cqi_table)[0] for i in range(1, 16)})
 
     best = None
     best_tput = -1.0
+    precoders = {}
     for rank in range(1, max_rank + 1):
         W = svd_precoder(H_freq, rank)
-        # batched post-MMSE SINR across all RBs at once
-        H_eff = H_freq @ W                      # [n_f, n_rx, rank]
+        precoders[rank] = W
+        # evaluate with the transmit power split across layers, exactly as
+        # the gNB will transmit (W / sqrt(rank)); otherwise the SINR of a
+        # rank-r hypothesis is overstated by 10*log10(r) dB
+        H_eff = H_freq @ (W / np.sqrt(rank))    # [n_f, n_rx, rank]
         sinrs = batch_mmse_sinr(H_eff, noise_var).reshape(-1)
-        # choose a representative modulation order for compression (64QAM)
-        eff_db = effective_sinr_miesm(sinrs, qm=6)
-        cqi = _sinr_to_cqi(eff_db, cqi_table, target_bler)
-        _, rate, eff = mcs_tables.get_cqi(cqi, cqi_table)
-        tput = rank * eff * (1.0 if cqi > 0 else 0.0)
+        # each CQI is judged with the MI curve of its own modulation order
+        eff = {qm: effective_sinr_miesm(sinrs, qm) for qm in qms}
+        reqs = cqi_required_sinr_db(cqi_table, rank, target_bler,
+                                    n_re_per_rb, n_rb)
+        cqi = 0
+        for i in range(15, 0, -1):              # highest CQI meeting target
+            qm_i = mcs_tables.get_cqi(i, cqi_table)[0]
+            if eff[qm_i] >= reqs[i - 1]:
+                cqi = i
+                break
+        _, _, se = mcs_tables.get_cqi(cqi, cqi_table)
+        tput = rank * se
         if tput > best_tput:
             best_tput = tput
-            best = CSIReport(rank, cqi, W, eff_db)
+            qm_rep = mcs_tables.get_cqi(cqi, cqi_table)[0] if cqi else qms[0]
+            best = CSIReport(rank, cqi, W, eff[qm_rep])
+    best.precoders = precoders
     return best
 
 
@@ -84,28 +116,20 @@ from functools import lru_cache
 
 
 @lru_cache(maxsize=None)
-def _cqi_required_snr(cqi_table: int, target_bler: float):
-    """Required effective SINR (dB) per CQI index — computed once and cached."""
-    from .link_abstraction import required_snr_db
-    margin = 0.5 * np.log10(0.1 / max(target_bler, 1e-3) + 1.0)
+def cqi_required_sinr_db(cqi_table: int, rank: int, target_bler: float,
+                         n_re_per_rb: int, n_rb: int) -> np.ndarray:
+    """Effective SINR (dB) at which each CQI 1..15 meets ``target_bler``.
+
+    Uses the TBS the CQI's (Qm, R) would give on the reference resource at
+    this rank.  The gNB uses the same table to turn a reported CQI back into
+    an SINR, so UE and gNB share one definition of the BLER target.
+    """
     reqs = []
     for cqi in range(1, 16):
         qm, rate, _ = mcs_tables.get_cqi(cqi, cqi_table)
-        reqs.append(required_snr_db(qm, rate) + 1.0 + 0.6 * rate + margin)
+        tb = tbs_mod.compute_tbs(n_re_per_rb, n_rb, qm, rate, rank)
+        reqs.append(required_eff_sinr_db(qm, rate, tb, target_bler))
     return np.array(reqs)
-
-
-def _sinr_to_cqi(eff_sinr_db: float, cqi_table: int, target_bler: float) -> int:
-    """Highest CQI whose required SNR (for target BLER) <= effective SINR."""
-    reqs = _cqi_required_snr(cqi_table, target_bler)
-    # CQIs must be satisfied contiguously from index 1 upward
-    best = 0
-    for i in range(len(reqs)):
-        if eff_sinr_db >= reqs[i]:
-            best = i + 1
-        else:
-            break
-    return best
 
 
 class CSIFeedbackChannel:

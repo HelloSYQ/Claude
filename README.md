@@ -144,7 +144,7 @@ python examples/waveform_demo.py
 | `--ntx / --nrx` | gNB / UE antennas | 4 / 2 |
 | `--model` | `TDL-A…E`, `CDL-A…E` or `AWGN` | TDL-C |
 | `--ds / --doppler` | delay spread (ns) / max Doppler (Hz) | 100 / 100 |
-| `--mcs-table` | 1 (64QAM), 2 (256QAM), 3 (low-SE) | 2 |
+| `--mcs-table` | 1 (64QAM), 2 (256QAM), 3 (low-SE), 4 (256QAM + 1024QAM, illustrative) | 2 |
 | `--tx-pol / --rx-pol` | CDL polarizations per position (1, or 2 for cross-polar ±45°) | 1 |
 | `--tx-layout / --rx-layout` | CDL panel `VxH` position grid (e.g. `2x2`); UPA when V>1 | auto (1×N) |
 | `--spacing-v / --spacing-h` | CDL element spacing (wavelengths) | 0.5 |
@@ -161,25 +161,41 @@ python examples/waveform_demo.py
 ## Example output
 
 ```
- SNR[dB]   SE[b/s/Hz]   Tput[Mbps]     BLER   avgMCS  avgRank   avgCQI
-   -5.00       0.36          6.7      0.100     1.35     1.97     2.80
-    0.00       0.51          9.4      0.117     1.93     2.00     4.27
-   10.00       3.15         57.8      0.117     9.72     2.00     8.12
-   20.00       5.59        102.6      0.100    16.40     2.00    11.33
-   30.00       8.46        155.3      0.083    23.47     2.00    13.47
+ SNR[dB]   SE[b/s/Hz]   Tput[Mbps]  BLER1st  resBLER   avgMCS  avgRank   avgCQI
+   -5.00       0.3213        5.900    0.135    0.006     2.02     1.02     3.38
+    0.00       0.7605       13.963    0.132    0.006     4.44     1.02     4.96
+   10.00       2.3761       43.626    0.152    0.000     7.15     2.00     6.73
+   20.00       5.0943       93.531    0.156    0.000    15.61     2.00    11.52
+   30.00       8.2198      150.916    0.126    0.000    23.82     2.00    14.63
 ```
 
 Observed behaviour (all physically consistent):
 
 * SE rises with SNR and saturates near the rank·log₂(M)·R ceiling.
 * AWGN > TDL fading; SE scales with MIMO rank (1×1 ≈ 4, 2×2 ≈ 8, 4×4 ≈ 16 b/s/Hz).
-* Residual BLER is held near the 0.1 target by the OLLA link adaptation.
+* Rank adaptation uses rank 1 at low SNR and switches to rank 2 as SNR rises.
+* `BLER1st` is the first-transmission BLER, which OLLA drives to the 0.1
+  target. In a 200-slot run it still includes OLLA's settling period (≈0.13);
+  over 3000 slots it converges to ≈0.10. `resBLER` is the fraction of transport
+  blocks still lost after all HARQ retransmissions.
 
-The **spectral efficiency** is computed as
+The **spectral efficiency** is computed over the allocated bandwidth:
 
 ```
-SE = delivered_information_bits / (num_slots · slot_duration) / occupied_bandwidth
+SE = delivered_information_bits / (num_slots · slot_duration) / (num_rb · 12 · SCS)
 ```
+
+### Link adaptation in the library path
+
+1. The UE evaluates every rank with the power split the gNB will use
+   (`W/√rank`), and reports the highest CQI whose effective SINR meets the
+   BLER target on the CSI reference resource.
+2. The gNB maps the CQI back to that SINR, subtracts the OLLA offset (dB), and
+   picks the highest MCS that meets the target at that SINR.
+3. OLLA is updated only on first transmissions: +0.5 dB after a NACK and
+   −0.5·p/(1−p) dB after an ACK. It can move in either direction.
+4. A HARQ retransmission keeps the transport block's rank, MCS and TBS, and is
+   chase-combined with the earlier attempts.
 
 ## Calibration against 3GPP / 5G-IA
 
@@ -202,11 +218,25 @@ SNR = total Es/N0).
 
 ```bash
 python tests/test_modules.py
+python tests/test_link_adaptation.py
 ```
 
-Validates constellation energy, noiseless modulation round-trip, MCS/TBS,
-TDL fading power normalisation, monotone BICM capacity, and genuine LDPC
-coding gain.
+`test_modules.py` validates constellation energy, noiseless modulation
+round-trip, MCS/TBS, TDL fading power normalisation, monotone BICM capacity,
+and genuine LDPC coding gain.
+
+`test_link_adaptation.py` holds regression tests for the link-adaptation path.
+They check that:
+
+- the CSI SINR equals the SINR of what is actually transmitted
+- the CQI/MCS thresholds invert the BLER waterfall
+- OLLA moves in both directions and has zero drift at the target
+- first-transmission BLER converges to the target
+- the config is not mutated, and serial and parallel sweeps give identical results
+- SE is computed over the allocated bandwidth
+- TBS quantisation follows the spec (`floor`, round-half-up)
+- MCS table 4 runs under link adaptation
+- HARQ accounting is correct (initial vs residual BLER)
 
 ---
 

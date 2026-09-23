@@ -42,16 +42,21 @@ from . import ldpc as ldpc_mod
 @dataclass
 class SNRPointResult:
     snr_db: float
-    spectral_efficiency: float     # bits/s/Hz
+    spectral_efficiency: float     # bits/s/Hz over the allocated bandwidth
     throughput_bps: float
-    bler: float
+    bler: float                    # first-transmission BLER (the OLLA target)
     avg_mcs: float
     avg_rank: float
     avg_cqi: float
+    residual_bler: float = 0.0     # TBs lost after all HARQ transmissions
 
 
 class NRDownlinkSimulator:
     def __init__(self, cfg: SimConfig):
+        if cfg.pdsch.num_rb > cfg.carrier.n_size_grid:
+            raise ValueError(
+                f"pdsch.num_rb={cfg.pdsch.num_rb} exceeds the carrier grid "
+                f"({cfg.carrier.n_size_grid} RB)")
         self.cfg = cfg
         self.rng = np.random.default_rng(cfg.seed)
 
@@ -104,30 +109,57 @@ class NRDownlinkSimulator:
         rb_freqs = (np.arange(n_rb) - n_rb / 2) * 12 * c.carrier.subcarrier_spacing_hz
         return chan.frequency_response(rb_freqs, t)
 
+    def _precoder(self, csi, rank, H_est, n_rb):
+        """Unit-column precoder W[f, n_tx, rank] for this transmission."""
+        c = self.cfg
+        if c.precoding == "none":
+            # open-loop: map layers straight to the first `rank` antenna
+            # ports (no transmit CSI), receiver separates the streams
+            W = np.zeros((n_rb, c.antenna.n_tx, rank), dtype=complex)
+            W[:] = np.eye(c.antenna.n_tx)[:, :rank]
+            return W
+        # closed-loop SVD precoding from the (delayed) CSI report; a HARQ
+        # retransmission keeps its rank, so take that rank's precoder
+        if csi is not None:
+            W = csi.precoders.get(rank)
+            if W is None and csi.precoder is not None \
+                    and csi.precoder.shape[2] == rank:
+                W = csi.precoder
+            if W is not None:
+                return W
+        # no report has arrived yet (first slots of the feedback delay)
+        return svd_precoder(H_est, rank)
+
     # ------------------------------------------------------------------
     def run_point(self, snr_db: float, snr_seed: int = 0) -> SNRPointResult:
         c = self.cfg
         chan, rng = self._make_channel(snr_seed)
         n_rb = c.pdsch.num_rb
         max_rank = min(c.antenna.n_tx, c.antenna.n_rx)
+        fixed_rank = max(1, min(c.pdsch.num_layers, max_rank))
+
+        # resource accounting is rank-independent: compute once, and never
+        # write back into the (shared) config
+        n_dmrs = rg.dmrs_re_per_rb(c.pdsch)
+        n_re_prb = tbs_mod.re_per_rb(c.pdsch.num_symbols, n_dmrs, c.pdsch.n_oh)
 
         scheduler = Scheduler(n_rb, c.pdsch.mcs_table, c.pdsch.target_bler,
-                              c.link_adaptation)
+                              c.link_adaptation, n_re_per_rb=n_re_prb)
         csi_fb = CSIFeedbackChannel(c.csi_feedback_delay_slots)
+        max_tx = c.harq.max_transmissions if c.harq.enabled else 1
 
         noise_var = 10 ** (-snr_db / 10.0)
 
         delivered_bits = 0
-        total_blocks = 0
-        error_blocks = 0
+        first_tx = first_tx_err = 0     # initial transmissions / NACKs
+        tbs_done = tbs_lost = 0         # finished TBs / TBs dropped after max_tx
         mcs_hist = []
         rank_hist = []
         cqi_hist = []
 
-        # HARQ state (single process, chase combining modelled by SINR sum)
-        harq_sinr_lin = None
-        harq_tx_count = 0
-        harq_payload = None
+        # Single HARQ process. A TB keeps its rank, MCS and TBS across
+        # retransmissions; chase combining is modelled by summing per-RE SINR.
+        harq = None
 
         for slot in range(c.num_slots):
             t = slot * c.carrier.slot_duration_s
@@ -140,107 +172,83 @@ class NRDownlinkSimulator:
                 H_est = estimate_channel_from_dmrs(H_true, noise_var, rng)
             if c.link_adaptation:
                 report = compute_csi(H_est, noise_var, max_rank,
-                                     c.pdsch.mcs_table, c.pdsch.target_bler)
+                                     c.pdsch.mcs_table, c.pdsch.target_bler,
+                                     n_re_per_rb=n_re_prb, n_rb=n_rb)
             else:
                 # fixed MCS: the rank/CQI search is unused; only a precoder is
                 # needed, and only in closed-loop (SVD) mode.
-                fixed_rank = max(1, min(c.pdsch.num_layers, max_rank))
                 W_rep = (None if c.precoding == "none"
                          else svd_precoder(H_est, fixed_rank))
                 report = CSIReport(fixed_rank, 0, W_rep, 0.0)
             csi_fb.push(report)
             active_csi = csi_fb.get()
 
-            # --- scheduler decision ---
-            decision = scheduler.schedule(active_csi, c.pdsch.mcs_index,
-                                          c.pdsch.num_layers)
-            rank = max(1, min(decision.num_layers, max_rank))
-            mcs = decision.mcs_index
-            info = mcs_tables.get_mcs(mcs, c.pdsch.mcs_table)
-
-            # --- resource / TBS ---
-            pdsch = c.pdsch
-            pdsch.num_layers = rank
-            n_dmrs = rg.dmrs_re_per_rb(pdsch)
-            n_re_prb = tbs_mod.re_per_rb(pdsch.num_symbols, n_dmrs, pdsch.n_oh)
-            tb_bits = tbs_mod.compute_tbs(n_re_prb, n_rb, info.modulation_order,
-                                          info.target_code_rate, rank)
-
-            # --- precoder actually used ---
-            if c.precoding == "none":
-                # open-loop: map layers straight to the first `rank` antenna
-                # ports (no transmit CSI), receiver separates the streams
-                W = np.zeros((n_rb, c.antenna.n_tx, rank), dtype=complex)
-                eye = np.eye(c.antenna.n_tx)[:, :rank]
-                W[:] = eye
-            else:
-                # closed-loop SVD precoding from the (delayed) CSI report
-                W = active_csi.precoder if active_csi is not None else \
-                    svd_precoder(H_est, rank)
-                if W.shape[2] != rank:
-                    W = svd_precoder(H_est, rank)
+            # --- scheduler: new TB, or retransmit the pending one ---
+            if harq is None:
+                decision = scheduler.schedule(active_csi, c.pdsch.mcs_index,
+                                              fixed_rank)
+                rank = max(1, min(decision.num_layers, max_rank))
+                info = mcs_tables.get_mcs(decision.mcs_index, c.pdsch.mcs_table)
+                tb_bits = tbs_mod.compute_tbs(n_re_prb, n_rb,
+                                              info.modulation_order,
+                                              info.target_code_rate, rank)
+                harq = dict(rank=rank, mcs=decision.mcs_index, info=info,
+                            tb_bits=tb_bits, n_tx=0, sinr=None)
+            rank, info, tb_bits = harq["rank"], harq["info"], harq["tb_bits"]
+            is_first_tx = harq["n_tx"] == 0
 
             # total transmit power constraint: split the (fixed) power across
             # layers so SNR is defined as total Es/N0 (a rank-2 transmission
             # does not get 2x the power of a rank-1 one).
-            W = W / np.sqrt(rank)
+            W = self._precoder(active_csi, rank, H_est, n_rb) / np.sqrt(rank)
 
             # --- post-equaliser SINR over the (true) channel ---
-            re_to_rb = np.arange(n_rb)
-            sinr_lin = per_re_sinr(H_true, W, noise_var, re_to_rb)
+            sinr_lin = per_re_sinr(H_true, W, noise_var, np.arange(n_rb))
 
             # --- decide block success ---
             if c.fec_mode == "ldpc":
                 ok = self._ldpc_block(info, sinr_lin, tb_bits, rng)
-                eff_db = effective_sinr_miesm(sinr_lin, info.modulation_order)
             else:
-                # HARQ chase combining: accumulate linear SINR across retx.
-                # Only combine when the retransmission uses a matching layout
-                # (same rank -> same SINR vector length); otherwise restart.
-                if (harq_sinr_lin is not None and harq_tx_count > 0
-                        and harq_sinr_lin.shape == sinr_lin.shape):
-                    comb = sinr_lin + harq_sinr_lin
-                else:
-                    comb = sinr_lin
+                # chase combining: same TB and rank, so the SINR vectors align
+                comb = sinr_lin if harq["sinr"] is None else sinr_lin + harq["sinr"]
                 eff_db = effective_sinr_miesm(comb, info.modulation_order)
                 bler = bler_from_effective_sinr(eff_db, info.modulation_order,
                                                 info.target_code_rate, tb_bits)
                 ok = rng.random() > bler
-                harq_sinr_lin = comb
+                harq["sinr"] = comb
+            harq["n_tx"] += 1
 
-            total_blocks += 1
-            harq_tx_count += 1
+            if is_first_tx:
+                # OLLA tracks the initial-transmission BLER only
+                first_tx += 1
+                first_tx_err += int(not ok)
+                scheduler.update_olla(ok)
 
             if ok:
                 delivered_bits += tb_bits
-                scheduler.update_olla(True)
-                harq_sinr_lin = None
-                harq_tx_count = 0
-            else:
-                error_blocks += 1
-                scheduler.update_olla(False)
-                if (not c.harq.enabled
-                        or harq_tx_count >= c.harq.max_transmissions):
-                    harq_sinr_lin = None
-                    harq_tx_count = 0
+                tbs_done += 1
+                harq = None
+            elif harq["n_tx"] >= max_tx:
+                tbs_done += 1
+                tbs_lost += 1
+                harq = None
 
-            mcs_hist.append(mcs)
+            mcs_hist.append(info.index)
             rank_hist.append(rank)
             cqi_hist.append(active_csi.cqi if active_csi else 0)
 
         total_time = c.num_slots * c.carrier.slot_duration_s
-        bw = c.carrier.occupied_bandwidth_hz
+        bw = n_rb * 12 * c.carrier.subcarrier_spacing_hz    # allocated BW
         throughput = delivered_bits / total_time
-        se = throughput / bw
-        bler = error_blocks / max(total_blocks, 1)
         return SNRPointResult(
             snr_db=snr_db,
-            spectral_efficiency=se,
+            spectral_efficiency=throughput / bw,
             throughput_bps=throughput,
-            bler=bler,
+            bler=first_tx_err / max(first_tx, 1),
             avg_mcs=float(np.mean(mcs_hist)),
             avg_rank=float(np.mean(rank_hist)),
             avg_cqi=float(np.mean(cqi_hist)),
+            residual_bler=tbs_lost / max(tbs_done, 1),
         )
 
     # ------------------------------------------------------------------

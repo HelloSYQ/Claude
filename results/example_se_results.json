@@ -12,138 +12,153 @@
   "points": [
     {
       "snr_db": -5.0,
-      "se": 0.37593899782135076,
-      "throughput_bps": 6902240.0,
-      "bler": 0.1,
-      "avg_mcs": 1.03,
-      "avg_rank": 1.97,
-      "avg_cqi": 2.88
+      "se": 0.3213464052287582,
+      "throughput_bps": 5899920.0,
+      "bler": 0.13450292397660818,
+      "residual_bler": 0.005847953216374269,
+      "avg_mcs": 2.025,
+      "avg_rank": 1.02,
+      "avg_cqi": 3.38
     },
     {
       "snr_db": -2.5,
-      "se": 0.4312244008714597,
-      "throughput_bps": 7917280.0,
-      "bler": 0.11,
-      "avg_mcs": 1.64,
-      "avg_rank": 1.77,
-      "avg_cqi": 3.84
+      "se": 0.49287581699346406,
+      "throughput_bps": 9049200.0,
+      "bler": 0.13218390804597702,
+      "residual_bler": 0.005780346820809248,
+      "avg_mcs": 3.045,
+      "avg_rank": 1.025,
+      "avg_cqi": 4.14
     },
     {
       "snr_db": 0.0,
-      "se": 0.5772113289760349,
-      "throughput_bps": 10597600.0,
-      "bler": 0.11,
-      "avg_mcs": 1.95,
-      "avg_rank": 1.95,
-      "avg_cqi": 4.07
+      "se": 0.7604923747276688,
+      "throughput_bps": 13962640.0,
+      "bler": 0.13218390804597702,
+      "residual_bler": 0.005747126436781609,
+      "avg_mcs": 4.44,
+      "avg_rank": 1.02,
+      "avg_cqi": 4.965
     },
     {
       "snr_db": 2.5,
-      "se": 0.8261176470588235,
-      "throughput_bps": 15167520.0,
-      "bler": 0.11,
-      "avg_mcs": 2.65,
-      "avg_rank": 2.0,
-      "avg_cqi": 4.94
+      "se": 1.0602919389978214,
+      "throughput_bps": 19466960.0,
+      "bler": 0.125,
+      "residual_bler": 0.005681818181818182,
+      "avg_mcs": 4.54,
+      "avg_rank": 1.5,
+      "avg_cqi": 4.89
     },
     {
       "snr_db": 5.0,
-      "se": 1.1627625272331155,
-      "throughput_bps": 21348320.0,
-      "bler": 0.11,
-      "avg_mcs": 3.65,
-      "avg_rank": 2.0,
-      "avg_cqi": 6.02
+      "se": 1.2350762527233115,
+      "throughput_bps": 22676000.0,
+      "bler": 0.125,
+      "residual_bler": 0.005681818181818182,
+      "avg_mcs": 4.225,
+      "avg_rank": 1.875,
+      "avg_cqi": 4.81
     },
     {
       "snr_db": 7.5,
-      "se": 2.0836688453159042,
-      "throughput_bps": 38256160.0,
-      "bler": 0.11,
-      "avg_mcs": 6.35,
-      "avg_rank": 2.0,
-      "avg_cqi": 7.16
+      "se": 1.932636165577342,
+      "throughput_bps": 35483200.0,
+      "bler": 0.13872832369942195,
+      "residual_bler": 0.0,
+      "avg_mcs": 5.895,
+      "avg_rank": 1.945,
+      "avg_cqi": 5.79
     },
     {
       "snr_db": 10.0,
-      "se": 2.8453159041394334,
-      "throughput_bps": 52240000.0,
-      "bler": 0.12,
-      "avg_mcs": 8.66,
+      "se": 2.376143790849673,
+      "throughput_bps": 43626000.0,
+      "bler": 0.15204678362573099,
+      "residual_bler": 0.0,
+      "avg_mcs": 7.15,
       "avg_rank": 2.0,
-      "avg_cqi": 8.04
+      "avg_cqi": 6.73
     },
     {
       "snr_db": 12.5,
-      "se": 3.4848714596949892,
-      "throughput_bps": 63982240.0,
-      "bler": 0.12,
-      "avg_mcs": 10.77,
+      "se": 3.1234684095860565,
+      "throughput_bps": 57346880.0,
+      "bler": 0.12994350282485875,
+      "residual_bler": 0.0,
+      "avg_mcs": 9.285,
       "avg_rank": 2.0,
-      "avg_cqi": 9.24
+      "avg_cqi": 7.83
     },
     {
       "snr_db": 15.0,
-      "se": 4.4424662309368195,
-      "throughput_bps": 81563680.0,
-      "bler": 0.11,
-      "avg_mcs": 13.49,
+      "se": 3.815777777777778,
+      "throughput_bps": 70057680.0,
+      "bler": 0.13068181818181818,
+      "residual_bler": 0.0,
+      "avg_mcs": 11.665,
       "avg_rank": 2.0,
-      "avg_cqi": 9.84
+      "avg_cqi": 8.965
     },
     {
       "snr_db": 17.5,
-      "se": 4.959137254901961,
-      "throughput_bps": 91049760.0,
-      "bler": 0.11,
-      "avg_mcs": 14.94,
+      "se": 4.5082962962962965,
+      "throughput_bps": 82772320.0,
+      "bler": 0.13068181818181818,
+      "residual_bler": 0.0,
+      "avg_mcs": 13.745,
       "avg_rank": 2.0,
-      "avg_cqi": 10.59
+      "avg_cqi": 9.8
     },
     {
       "snr_db": 20.0,
-      "se": 5.739023965141612,
-      "throughput_bps": 105368480.0,
-      "bler": 0.1,
-      "avg_mcs": 16.84,
+      "se": 5.094265795206971,
+      "throughput_bps": 93530720.0,
+      "bler": 0.15606936416184972,
+      "residual_bler": 0.0,
+      "avg_mcs": 15.61,
       "avg_rank": 2.0,
-      "avg_cqi": 11.72
+      "avg_cqi": 11.52
     },
     {
       "snr_db": 22.5,
-      "se": 6.540575163398692,
-      "throughput_bps": 120084960.0,
-      "bler": 0.09,
-      "avg_mcs": 18.61,
+      "se": 5.7160392156862745,
+      "throughput_bps": 104946480.0,
+      "bler": 0.15028901734104047,
+      "residual_bler": 0.0,
+      "avg_mcs": 17.22,
       "avg_rank": 2.0,
-      "avg_cqi": 12.07
+      "avg_cqi": 12.515
     },
     {
       "snr_db": 25.0,
-      "se": 7.353063180827887,
-      "throughput_bps": 135002240.0,
-      "bler": 0.09,
-      "avg_mcs": 20.75,
+      "se": 6.46162962962963,
+      "throughput_bps": 118635520.0,
+      "bler": 0.13793103448275862,
+      "residual_bler": 0.0,
+      "avg_mcs": 19.045,
       "avg_rank": 2.0,
-      "avg_cqi": 12.48
+      "avg_cqi": 12.945
     },
     {
       "snr_db": 27.5,
-      "se": 8.035407407407407,
-      "throughput_bps": 147530080.0,
-      "bler": 0.09,
-      "avg_mcs": 22.52,
+      "se": 7.758326797385621,
+      "throughput_bps": 142442880.0,
+      "bler": 0.125,
+      "residual_bler": 0.0,
+      "avg_mcs": 22.435,
       "avg_rank": 2.0,
-      "avg_cqi": 13.62
+      "avg_cqi": 14.15
     },
     {
       "snr_db": 30.0,
-      "se": 8.995032679738562,
-      "throughput_bps": 165148800.0,
-      "bler": 0.07,
-      "avg_mcs": 24.33,
+      "se": 8.219808278867102,
+      "throughput_bps": 150915680.0,
+      "bler": 0.12643678160919541,
+      "residual_bler": 0.0,
+      "avg_mcs": 23.815,
       "avg_rank": 2.0,
-      "avg_cqi": 14.08
+      "avg_cqi": 14.635
     }
   ]
 }
