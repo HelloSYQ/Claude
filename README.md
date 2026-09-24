@@ -133,6 +133,10 @@ python examples/compare_configs.py
 
 # Time-domain OFDM waveform: EVM vs CFO and timing offset
 python examples/waveform_demo.py
+
+# CDL power-delay-profile verification vs TR 38.901
+# (writes results/cdl_pdp_verification.png, ~1 min)
+python examples/verify_cdl_pdp.py
 ```
 
 ### Key CLI options
@@ -219,6 +223,7 @@ SNR = total Es/N0).
 ```bash
 python tests/test_modules.py
 python tests/test_link_adaptation.py
+python tests/test_cdl_pdp.py
 ```
 
 `test_modules.py` validates constellation energy, noiseless modulation
@@ -237,6 +242,34 @@ They check that:
 - TBS quantisation follows the spec (`floor`, round-half-up)
 - MCS table 4 runs under link adaptation
 - HARQ accounting is correct (initial vs residual BLER)
+
+`test_cdl_pdp.py` checks that the CDL generator reproduces the TR 38.901 power
+delay profile. It checks that:
+
+- the tables' delays, powers and LOS power equal the TR 38.901 values shipped
+  with NVIDIA Sionna. This check is skipped unless Sionna's data files are
+  present (`pip install --no-deps sionna`).
+- each table is normalised to unit RMS delay spread, and the CDL-D/E K-factors
+  are 13.3 / 22.0 dB
+- every cluster's power, recovered from the generated H(f) by least squares on
+  the table delays, is within 0.5 dB of the table. The fit leaves no residual,
+  so all the energy sits exactly at the table delays.
+- the realised RMS delay spread equals the configured DS
+- E[H(f)H\*(f+Δf)] equals the Fourier transform of the table PDP
+- the Ricean K-factor recovered from the generated channel matches the table
+
+### CDL PDP verification
+
+`examples/verify_cdl_pdp.py` runs the same checks with 1000 channel draws
+(each with its own random ray phases) and plots them in
+`results/cdl_pdp_verification.png`. It also checks that the error falls as
+1/√N (no bias), and that the directional TR 38.901 element reshapes the PDP
+exactly by each cluster's mean element gain.
+
+Result at DS = 100 ns: cluster powers match the table to 0.05–0.14 dB rms
+(maximum 0.29 dB). The realised delay spread is within 1% of the configured
+value at 30, 100 and 300 ns. The recovered K-factors are 13.37 dB (CDL-D) and
+22.07 dB (CDL-E), against 13.3 and 22.0 dB in the table.
 
 ---
 
