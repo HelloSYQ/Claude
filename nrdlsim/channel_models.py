@@ -358,24 +358,111 @@ def build_panel(n_ant: int, pol: int, layout, spacing_v: float,
     return np.array(positions), np.array(slant)
 
 
-def element_power_gain(az_deg, zen_deg, boresight_az_deg=0.0,
-                       downtilt_deg=0.0, g_max_dbi=8.0, hpbw_deg=65.0,
-                       front_back_db=30.0):
-    """3GPP directional antenna element power gain (TR 38.901 Table 7.3-1).
+def rotation_matrix(bearing_deg=0.0, downtilt_deg=0.0, slant_deg=0.0):
+    """LCS -> GCS rotation R = Rz(alpha) Ry(beta) Rx(gamma) (TR 38.901 eq. 7.1-4).
 
-    Combines the vertical and horizontal cuts and adds the maximum element
-    gain G_E,max.  Returns the *linear* power gain evaluated at the ray angle
-    relative to the panel boresight (azimuth ``boresight_az_deg`` and mechanical
-    downtilt ``downtilt_deg``).  Isotropic behaviour is obtained by not calling
-    this (gain = 1).
+    alpha = bearing (boresight azimuth), beta = mechanical downtilt (positive
+    tilts the boresight below the horizon), gamma = mechanical slant (roll
+    about the boresight).  Panels are built in the LCS y-z plane with the
+    boresight along the local x axis.
     """
-    phi = ((np.asarray(az_deg) - boresight_az_deg + 180.0) % 360.0) - 180.0
-    theta = np.asarray(zen_deg)
-    a_v = -np.minimum(12.0 * ((theta - 90.0 - downtilt_deg) / hpbw_deg) ** 2,
+    a, b, g = np.deg2rad([bearing_deg, downtilt_deg, slant_deg])
+    Rz = np.array([[np.cos(a), -np.sin(a), 0.0],
+                   [np.sin(a), np.cos(a), 0.0],
+                   [0.0, 0.0, 1.0]])
+    Ry = np.array([[np.cos(b), 0.0, np.sin(b)],
+                   [0.0, 1.0, 0.0],
+                   [-np.sin(b), 0.0, np.cos(b)]])
+    Rx = np.array([[1.0, 0.0, 0.0],
+                   [0.0, np.cos(g), -np.sin(g)],
+                   [0.0, np.sin(g), np.cos(g)]])
+    return Rz @ Ry @ Rx
+
+
+def _theta_hat(az_rad, zen_rad):
+    return np.stack([np.cos(zen_rad) * np.cos(az_rad),
+                     np.cos(zen_rad) * np.sin(az_rad),
+                     -np.sin(zen_rad)], axis=-1)
+
+
+def _phi_hat(az_rad):
+    return np.stack([-np.sin(az_rad), np.cos(az_rad), np.zeros_like(az_rad)],
+                    axis=-1)
+
+
+def to_local_angles(az_deg, zen_deg, R):
+    """GCS (azimuth, zenith) -> LCS angles (TR 38.901 eq. 7.1-7 / 7.1-8)."""
+    r_loc = _dir_cosines(np.asarray(az_deg, float),
+                         np.asarray(zen_deg, float)) @ R        # (R^T r)^T
+    zen_l = np.rad2deg(np.arccos(np.clip(r_loc[..., 2], -1.0, 1.0)))
+    az_l = np.rad2deg(np.arctan2(r_loc[..., 1], r_loc[..., 0]))
+    return az_l, zen_l
+
+
+def local_element_gain(az_l, zen_l, g_max_dbi=8.0, hpbw_deg=65.0,
+                       front_back_db=30.0):
+    """TR 38.901 Table 7.3-1 power pattern in the element's own LCS.
+
+    Boresight is at local azimuth 0, zenith 90.  Vertical and horizontal cuts
+    use the same 3 dB beamwidth; SLA_V = A_max = ``front_back_db``.
+    """
+    phi = ((np.asarray(az_l) + 180.0) % 360.0) - 180.0
+    a_v = -np.minimum(12.0 * ((np.asarray(zen_l) - 90.0) / hpbw_deg) ** 2,
                       front_back_db)
     a_h = -np.minimum(12.0 * (phi / hpbw_deg) ** 2, front_back_db)
     a_db = -np.minimum(-(a_v + a_h), front_back_db)
     return 10.0 ** ((g_max_dbi + a_db) / 10.0)
+
+
+def element_power_gain(az_deg, zen_deg, boresight_az_deg=0.0,
+                       downtilt_deg=0.0, g_max_dbi=8.0, hpbw_deg=65.0,
+                       front_back_db=30.0, slant_deg=0.0):
+    """3GPP directional element power gain toward GCS angles (az, zen).
+
+    The element is oriented by bearing ``boresight_az_deg``, mechanical
+    ``downtilt_deg`` and ``slant_deg``; the GCS angles are rotated into the
+    element LCS (TR 38.901 clause 7.1.3) and the Table 7.3-1 pattern applied.
+    Returns the *linear* power gain (G_E,max included).
+    """
+    R = rotation_matrix(boresight_az_deg, downtilt_deg, slant_deg)
+    az_l, zen_l = to_local_angles(az_deg, zen_deg, R)
+    return local_element_gain(az_l, zen_l, g_max_dbi, hpbw_deg, front_back_db)
+
+
+def element_field(az_deg, zen_deg, pol_slant_rad, R, pattern="omni",
+                  g_max_dbi=8.0, hpbw_deg=65.0, front_back_db=30.0):
+    """GCS field components of every element of a rotated panel.
+
+    Polarization model 2 in the element LCS: F'_theta = sqrt(A') cos(zeta),
+    F'_phi = sqrt(A') sin(zeta), with zeta the polarization slant of each
+    element.  The local field is expressed in the GCS through the rotated
+    local unit vectors, which is eq. 7.1-11 with the psi of eq. 7.1-15, so a
+    tilted or rolled panel also rotates its polarization.
+
+    Returns (F, A): F with shape (..., n_ant, 2) = (F_theta, F_phi), and the
+    power pattern A with shape (...).
+    """
+    az_deg = np.asarray(az_deg, float)
+    zen_deg = np.asarray(zen_deg, float)
+    az_l, zen_l = to_local_angles(az_deg, zen_deg, R)
+    if pattern == "38.901":
+        A = local_element_gain(az_l, zen_l, g_max_dbi, hpbw_deg, front_back_db)
+    elif pattern == "omni":
+        A = np.ones_like(az_l)
+    else:
+        raise ValueError(f"unknown element pattern {pattern!r}")
+    amp = np.sqrt(A)[..., None]
+    f_th_l = amp * np.cos(pol_slant_rad)                   # (..., n_ant)
+    f_ph_l = amp * np.sin(pol_slant_rad)
+    # local unit vectors expressed in the GCS
+    th_l = _theta_hat(np.deg2rad(az_l), np.deg2rad(zen_l)) @ R.T
+    th_g = _theta_hat(np.deg2rad(az_deg), np.deg2rad(zen_deg))
+    ph_g = _phi_hat(np.deg2rad(az_deg))
+    cos_psi = np.sum(th_l * th_g, axis=-1)[..., None]
+    sin_psi = np.sum(th_l * ph_g, axis=-1)[..., None]
+    F = np.stack([cos_psi * f_th_l - sin_psi * f_ph_l,
+                  sin_psi * f_th_l + cos_psi * f_ph_l], axis=-1)
+    return F, A
 
 
 def _location_phase(positions: np.ndarray, az_deg: np.ndarray,
@@ -406,6 +493,13 @@ class CDLChannel:
     LOS models add the deterministic specular term of eq. 7.5-29 with the
     [[1,0],[0,-1]] co-polar matrix.  A scalar normalisation makes the average
     per-port power unity so the SNR sweep is comparable across array configs.
+
+    Each panel is oriented by (bearing, downtilt, slant) = (``boresight_az_deg``,
+    ``downtilt_deg``, ``slant_deg``) at the gNB and the ``rx_*`` equivalents at
+    the UE.  The rotation of TR 38.901 clause 7.1.3 is applied consistently to
+    the element positions, the element pattern and the polarization, so F(.)
+    above is really the per-ray GCS field of eq. 7.1-11.  The UE element can
+    differ from the gNB element via ``rx_element_*`` (default: same).
     """
 
     RAYS = 20
@@ -421,6 +515,10 @@ class CDLChannel:
                  element_max_gain_dbi: float = 8.0, element_hpbw_deg: float = 65.0,
                  element_front_back_db: float = 30.0,
                  travel_az_deg: float = 0.0, travel_zen_deg: float = 90.0,
+                 slant_deg: float = 0.0, rx_slant_deg: float = 0.0,
+                 rx_element_max_gain_dbi: float | None = None,
+                 rx_element_hpbw_deg: float | None = None,
+                 rx_element_front_back_db: float | None = None,
                  rng=None):
         if model not in _CDL:
             raise ValueError(f"unknown CDL model {model}")
@@ -464,14 +562,39 @@ class CDLChannel:
             powers_lin = powers_lin / powers_lin.sum()
         self.powers = powers_lin
 
-        # --- antenna panels (positions in wavelengths + polarization slants) ---
-        self.pos_tx, slant_tx = build_panel(n_tx, tx_pol, tx_layout,
-                                            spacing_v, spacing_h)
-        self.pos_rx, slant_rx = build_panel(n_rx, rx_pol, rx_layout,
-                                            spacing_v, spacing_h)
-        # polarization field vectors F = [cos ζ, sin ζ]  -> (n_ant, 2)
-        self.F_tx = np.stack([np.cos(slant_tx), np.sin(slant_tx)], axis=1)
-        self.F_rx = np.stack([np.cos(slant_rx), np.sin(slant_rx)], axis=1)
+        # --- antenna panels, oriented by (bearing, downtilt, slant) -----------
+        # Panels are built in their LCS (y-z plane, boresight = local x) and
+        # rotated into the GCS (TR 38.901 clause 7.1.3): element positions,
+        # radiation pattern and polarization all turn together.
+        self.R_tx = rotation_matrix(boresight_az_deg, downtilt_deg, slant_deg)
+        self.R_rx = rotation_matrix(rx_boresight_az_deg, rx_downtilt_deg,
+                                    rx_slant_deg)
+        pos_tx, slant_tx = build_panel(n_tx, tx_pol, tx_layout,
+                                       spacing_v, spacing_h)
+        pos_rx, slant_rx = build_panel(n_rx, rx_pol, rx_layout,
+                                       spacing_v, spacing_h)
+        self.pos_tx = pos_tx @ self.R_tx.T
+        self.pos_rx = pos_rx @ self.R_rx.T
+
+        # element parameters: the UE may use a different element from the gNB
+        tx_el = dict(g_max_dbi=element_max_gain_dbi, hpbw_deg=element_hpbw_deg,
+                     front_back_db=element_front_back_db)
+        rx_el = dict(
+            g_max_dbi=(element_max_gain_dbi if rx_element_max_gain_dbi is None
+                       else rx_element_max_gain_dbi),
+            hpbw_deg=(element_hpbw_deg if rx_element_hpbw_deg is None
+                      else rx_element_hpbw_deg),
+            front_back_db=(element_front_back_db if rx_element_front_back_db
+                           is None else rx_element_front_back_db))
+
+        # --- per-ray GCS field of every element (pattern + polarization) ---
+        F_tx, g_tx = element_field(self.aod, self.zod, slant_tx, self.R_tx,
+                                   tx_pattern, **tx_el)      # (c,m,s,2), (c,m)
+        F_rx, g_rx = element_field(self.aoa, self.zoa, slant_rx, self.R_rx,
+                                   rx_pattern, **rx_el)      # (c,m,u,2), (c,m)
+        # per-ray power gain sqrt(g_tx g_rx), kept for inspection; the gain
+        # itself is already inside the fields
+        self.ray_gain = np.sqrt(g_tx * g_rx)                  # (c, m)
 
         # --- per-ray polarization coupling matrix (eq. 7.5-22) ---
         phi = self.rng.uniform(-np.pi, np.pi, size=(n_clu, self.RAYS, 2, 2))
@@ -479,9 +602,9 @@ class CDLChannel:
         inv_sqrt_k = np.sqrt(1.0 / self.kappa)
         M[..., 0, 1] *= inv_sqrt_k
         M[..., 1, 0] *= inv_sqrt_k
-        # coupling[c,m,u,s] = F_rx[u] . M[c,m] . F_tx[s]
-        self.coupling = np.einsum('ua,cmab,sb->cmus',
-                                  self.F_rx, M, self.F_tx)
+        # coupling[c,m,u,s] = F_rx[c,m,u] . M[c,m] . F_tx[c,m,s]
+        self.coupling = np.einsum('cmua,cmab,cmsb->cmus', F_rx, M, F_tx,
+                                  optimize=True)
 
         # --- location phases per ray/element ---
         self.a_tx = _location_phase(self.pos_tx, self.aod, self.zod)  # (c,m,s)
@@ -492,64 +615,46 @@ class CDLChannel:
         rx_dir = _dir_cosines(self.aoa, self.zoa)             # (c, m, 3)
         self.doppler = self.fd * (rx_dir @ v_hat)             # (c, m)
 
-        # --- antenna element gain shaping (TR 38.901 Table 7.3-1) ---
-        gain_kw = dict(g_max_dbi=element_max_gain_dbi, hpbw_deg=element_hpbw_deg,
-                       front_back_db=element_front_back_db)
-        if tx_pattern == "38.901":
-            g_tx = element_power_gain(self.aod, self.zod, boresight_az_deg,
-                                      downtilt_deg, **gain_kw)
-        else:
-            g_tx = np.ones((n_clu, self.RAYS))
-        if rx_pattern == "38.901":
-            g_rx = element_power_gain(self.aoa, self.zoa, rx_boresight_az_deg,
-                                      rx_downtilt_deg, **gain_kw)
-        else:
-            g_rx = np.ones((n_clu, self.RAYS))
-        # field-amplitude factor per ray = sqrt(power gain tx * power gain rx)
-        self.ray_gain = np.sqrt(g_tx * g_rx)                  # (c, m)
-
         # --- LOS specular terms ---
         if self.has_los:
             los_pol = np.array([[1.0, 0.0], [0.0, -1.0]])     # eq. 7.5-29
-            self.los_coupling = self.F_rx @ los_pol @ self.F_tx.T  # (u, s)
             a0, a1, z0, z1 = (self.los_angles[0], self.los_angles[1],
                               self.los_angles[2], self.los_angles[3])
+            Ft_los, g_tx_los = element_field(a0, z0, slant_tx, self.R_tx,
+                                             tx_pattern, **tx_el)   # (s, 2)
+            Fr_los, g_rx_los = element_field(a1, z1, slant_rx, self.R_rx,
+                                             rx_pattern, **rx_el)   # (u, 2)
+            self.los_coupling = Fr_los @ los_pol @ Ft_los.T           # (u, s)
+            self.los_gain = float(np.sqrt(g_tx_los * g_rx_los))
             self.los_a_tx = _location_phase(self.pos_tx, np.array(a0),
                                             np.array(z0))
             self.los_a_rx = _location_phase(self.pos_rx, np.array(a1),
                                             np.array(z1))
             self.los_doppler = self.fd * float(
                 _dir_cosines(np.array(a1), np.array(z1)) @ v_hat)
-            g_tx_los = (element_power_gain(a0, z0, boresight_az_deg,
-                                           downtilt_deg, **gain_kw)
-                        if tx_pattern == "38.901" else 1.0)
-            g_rx_los = (element_power_gain(a1, z1, rx_boresight_az_deg,
-                                           rx_downtilt_deg, **gain_kw)
-                        if rx_pattern == "38.901" else 1.0)
-            self.los_gain = float(np.sqrt(g_tx_los * g_rx_los))
 
         # --- power normalisation so mean per-port power is unity ---
-        # E[|H_us|^2] = e_coupling[u,s] * sum_cm (P_c/M) g_tx g_rx   (+ LOS term)
-        frx2 = np.abs(self.F_rx) ** 2                         # (n_rx, 2)
-        ftx2 = np.abs(self.F_tx) ** 2                         # (n_tx, 2)
-        diag = frx2 @ ftx2.T                                  # (n_rx, n_tx)
-        e_coupling = diag + (1.0 / self.kappa) * (1.0 - diag)
-        g_diffuse = np.sum(self.powers[:, None] / self.RAYS * self.ray_gain ** 2)
-        power_us = e_coupling * g_diffuse
+        # With independent random phases in M, per ray
+        # E|h_us|^2 = |Fr_th Ft_th|^2 + |Fr_ph Ft_ph|^2
+        #             + (|Fr_th Ft_ph|^2 + |Fr_ph Ft_th|^2) / XPR
+        fr2, ft2 = np.abs(F_rx) ** 2, np.abs(F_tx) ** 2
+        co = np.einsum('cmua,cmsa->cmus', fr2, ft2, optimize=True)
+        cross = np.einsum('cmua,cmsa->cmus', fr2, ft2[..., ::-1], optimize=True)
+        power_us = np.einsum('c,cmus->us', self.powers / self.RAYS,
+                             co + cross / self.kappa, optimize=True)
         if self.has_los:
-            power_us = power_us + (self.p_los * self.los_gain ** 2
-                                   * np.abs(self.los_coupling) ** 2)
+            power_us = power_us + self.p_los * np.abs(self.los_coupling) ** 2
         self.norm = 1.0 / np.sqrt(power_us.mean())
 
     def _cluster_spatial(self, t: float) -> np.ndarray:
         """Per-cluster spatial matrices at time ``t``: (n_clu, n_rx, n_tx)."""
-        w = np.sqrt(self.powers[:, None] / self.RAYS) * self.ray_gain \
+        w = np.sqrt(self.powers[:, None] / self.RAYS) \
             * np.exp(1j * 2 * np.pi * self.doppler * t)       # (c, m)
         # H_c[u,s] = sum_m w[c,m] coupling[c,m,u,s] a_rx[c,m,u] a_tx[c,m,s]
         Hc = np.einsum('cm,cmus,cmu,cms->cus', w, self.coupling,
-                       self.a_rx, self.a_tx)
+                       self.a_rx, self.a_tx, optimize=True)
         if self.has_los:
-            los = np.sqrt(self.p_los) * self.los_gain * np.exp(
+            los = np.sqrt(self.p_los) * np.exp(
                 1j * 2 * np.pi * self.los_doppler * t)
             Hc[0] += los * self.los_coupling \
                 * np.outer(self.los_a_rx, self.los_a_tx)

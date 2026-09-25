@@ -224,6 +224,7 @@ SNR = total Es/N0).
 python tests/test_modules.py
 python tests/test_link_adaptation.py
 python tests/test_cdl_pdp.py
+python tests/test_antenna_orientation.py
 ```
 
 `test_modules.py` validates constellation energy, noiseless modulation
@@ -319,6 +320,19 @@ sample-level path for studying synchronisation and CP-overrun.
   normalisation accounts for the pattern analytically, so enabling it reshapes
   the channel's spatial structure without conflating it with a raw SNR offset.
   Set `--tx-pattern 38.901` (default `omni` = isotropic 0 dBi).
+* **Panel orientation** follows TR 38.901 §7.1.3. Each panel has a bearing α,
+  a mechanical downtilt β (positive points below the horizon) and a slant γ
+  (roll about the boresight). The CDL parameters are `boresight_az_deg`,
+  `downtilt_deg` and `slant_deg` for the gNB, plus the `rx_*` equivalents for
+  the UE.
+  - The rotation R = Rz(α)Ry(β)Rx(γ) is applied to the **element positions**,
+    the **radiation pattern** and the **polarization** together. A tilted or
+    rolled handset therefore also rotates its array and its polarization,
+    through the ψ angle of eq. 7.1-15.
+  - The UE element can differ from the gNB element (`rx_element_max_gain_dbi`,
+    `rx_element_hpbw_deg`, `rx_element_front_back_db`).
+  - `tests/test_antenna_orientation.py` checks the implementation against the
+    spec's closed-form expressions (eqs. 7.1-7, 7.1-8, 7.1-15).
 * Channel estimation, PMI selection and CQI use ideal-CSI SVD beamforming as a
   practical proxy for the Type-I codebook; DM-RS estimation error is modelled.
 * The `miesm` link abstraction is the standard methodology for producing SE

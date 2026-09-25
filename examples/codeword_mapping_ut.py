@@ -5,10 +5,13 @@ Redo of the 1-CW-vs-4-CW comparison contrasting two UE antenna models:
 
   * 'array' : omni dual-pol UPA (fixed orientation) -- the earlier model.
   * 'UT'    : handheld -- directional dual-pol elements (broad UE pattern,
-              ~5 dBi / 90 deg HPBW) at a RANDOM device orientation per drop
-              (uniform azimuth, tilted zenith). The directional element +
-              orientation change the angular filtering, hence the per-layer
-              (eigenmode) SINR spread that drives the codeword-mapping trade-off.
+              ~5 dBi / 90 deg HPBW) at a RANDOM device orientation per drop:
+              uniform bearing, boresight within +/-20 deg of horizontal
+              (downtilt uniform in [-20, 20]). The TR 38.901 clause 7.1.3
+              rotation turns the element pattern, the polarization and the
+              panel geometry together. The directional element + orientation
+              change the angular filtering, hence the per-layer (eigenmode)
+              SINR spread that drives the codeword-mapping trade-off.
 
 Scenario: CDL-C DS=30 ns, 24 RB @ 30 kHz, 32T4R, SVD, upper 6 GHz (6.7 GHz),
 ~3 km/h. Each scheme adapts MCS naturally (max expected throughput).
@@ -62,10 +65,13 @@ def make_channel(seed, ue_model, orient_rng):
               tx_pol=2, rx_pol=2, tx_layout=(2, 8), rx_layout=(1, 2),
               rng=np.random.default_rng(seed))
     if ue_model == "ut":
+        # handset boresight: uniform bearing, within +/-20 deg of horizontal.
+        # The TR 38.901 rotation turns the pattern, the polarization and the
+        # 1x2 dual-pol panel together.
         kw.update(rx_pattern="38.901",
                   rx_boresight_az_deg=orient_rng.uniform(0, 360),
-                  rx_downtilt_deg=orient_rng.uniform(70, 110),
-                  element_max_gain_dbi=5.0, element_hpbw_deg=90.0)
+                  rx_downtilt_deg=orient_rng.uniform(-20, 20),
+                  rx_element_max_gain_dbi=5.0, rx_element_hpbw_deg=90.0)
     return CDLChannel(**kw)
 
 

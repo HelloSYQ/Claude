@@ -86,6 +86,10 @@ class NRDownlinkSimulator:
                 element_max_gain_dbi=a.element_max_gain_dbi,
                 element_hpbw_deg=a.element_hpbw_deg,
                 element_front_back_db=a.element_front_back_db,
+                slant_deg=a.slant_deg, rx_slant_deg=a.rx_slant_deg,
+                rx_element_max_gain_dbi=a.rx_element_max_gain_dbi,
+                rx_element_hpbw_deg=a.rx_element_hpbw_deg,
+                rx_element_front_back_db=a.rx_element_front_back_db,
                 travel_az_deg=c.channel.travel_az_deg,
                 travel_zen_deg=c.channel.travel_zen_deg,
                 rng=rng)

@@ -66,12 +66,14 @@ def scheme_throughput(sinr, ncw_max):
 
 
 def make_ut_channel(seed, orient_rng):
+    # handset: uniform bearing, boresight within +/-20 deg of horizontal; the
+    # TR 38.901 rotation turns pattern, polarization and the 2x2 panel together
     return CDLChannel("CDL-C", 30, FD, n_tx=N_TX, n_rx=N_RX, carrier_freq_hz=FC,
                       tx_pol=2, rx_pol=2, tx_layout=(2, 8), rx_layout=(2, 2),
                       rx_pattern="38.901",
                       rx_boresight_az_deg=orient_rng.uniform(0, 360),
-                      rx_downtilt_deg=orient_rng.uniform(70, 110),
-                      element_max_gain_dbi=5.0, element_hpbw_deg=90.0,
+                      rx_downtilt_deg=orient_rng.uniform(-20, 20),
+                      rx_element_max_gain_dbi=5.0, rx_element_hpbw_deg=90.0,
                       rng=np.random.default_rng(seed))
 
 

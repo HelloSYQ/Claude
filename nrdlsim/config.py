@@ -117,13 +117,22 @@ class AntennaConfig:
     # 'omni' = isotropic 0 dBi; '38.901' = directional sectored element.
     tx_pattern: str = "omni"            # 'omni' or '38.901'
     rx_pattern: str = "omni"            # 'omni' or '38.901'
-    boresight_az_deg: float = 0.0       # tx panel boresight azimuth
+    # Panel orientation (TR 38.901 clause 7.1.3): bearing, downtilt (positive =
+    # below the horizon) and slant (roll about boresight).  The rotation turns
+    # the element positions, pattern and polarization together.
+    boresight_az_deg: float = 0.0       # tx panel bearing
     downtilt_deg: float = 0.0           # tx mechanical downtilt
-    rx_boresight_az_deg: float = 0.0    # rx panel boresight azimuth
+    slant_deg: float = 0.0              # tx mechanical slant
+    rx_boresight_az_deg: float = 0.0    # rx panel bearing
     rx_downtilt_deg: float = 0.0        # rx mechanical downtilt
+    rx_slant_deg: float = 0.0           # rx mechanical slant
     element_max_gain_dbi: float = 8.0   # G_E,max
     element_hpbw_deg: float = 65.0      # 3 dB beamwidth (theta_3dB, phi_3dB)
     element_front_back_db: float = 30.0  # SLA_V and A_max
+    # UE element; None = same as the gNB element above
+    rx_element_max_gain_dbi: Optional[float] = None
+    rx_element_hpbw_deg: Optional[float] = None
+    rx_element_front_back_db: Optional[float] = None
 
 
 @dataclass
