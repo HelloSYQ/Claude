@@ -100,6 +100,13 @@ source myvenv/bin/activate
 pip install -r requirements.txt
 ```
 
+`nrdlsim` is also an installable package (`pyproject.toml`; runtime
+dependency: NumPy only). Other projects can pin it straight from git:
+
+```bash
+pip install "nrdlsim @ git+https://github.com/HelloSYQ/Claude.git@<commit>"
+```
+
 ## Usage
 
 ```bash

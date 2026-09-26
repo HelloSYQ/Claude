@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nrdlsim"
+version = "1.0.0"
+description = "NR downlink link-level simulator (PDSCH chain, TR 38.901 channels, MIESM link abstraction)"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+# examples, notebooks and plotting scripts
+examples = ["scipy>=1.10", "matplotlib>=3.6"]
+
+[tool.setuptools]
+packages = ["nrdlsim"]
