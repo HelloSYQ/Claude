@@ -321,8 +321,7 @@ _CDL = {
 
 def _dir_cosines(az_deg, zen_deg):
     """Cartesian unit vector(s) for spherical azimuth/zenith angles (deg)."""
-    az = np.deg2rad(az_deg)
-    zen = np.deg2rad(zen_deg)
+    az, zen = np.broadcast_arrays(np.deg2rad(az_deg), np.deg2rad(zen_deg))
     return np.stack([np.sin(zen) * np.cos(az),
                      np.sin(zen) * np.sin(az),
                      np.cos(zen)], axis=-1)
@@ -442,8 +441,8 @@ def element_field(az_deg, zen_deg, pol_slant_rad, R, pattern="omni",
     Returns (F, A): F with shape (..., n_ant, 2) = (F_theta, F_phi), and the
     power pattern A with shape (...).
     """
-    az_deg = np.asarray(az_deg, float)
-    zen_deg = np.asarray(zen_deg, float)
+    az_deg, zen_deg = np.broadcast_arrays(np.asarray(az_deg, float),
+                                          np.asarray(zen_deg, float))
     az_l, zen_l = to_local_angles(az_deg, zen_deg, R)
     if pattern == "38.901":
         A = local_element_gain(az_l, zen_l, g_max_dbi, hpbw_deg, front_back_db)

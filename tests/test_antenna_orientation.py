@@ -57,6 +57,22 @@ def test_pattern_and_array_turn_together():
     print("pattern peak, array broadside and polarization rotate together: OK")
 
 
+def test_mixed_shape_angles_broadcast():
+    # e.g. an azimuth cut: array of azimuths at one zenith (used by the guide
+    # notebook); must match element-by-element scalar evaluation
+    az = np.linspace(-180, 180, 37)
+    g = element_power_gain(az, 90.0, 20.0, 5.0)
+    assert g.shape == az.shape
+    assert np.allclose(g, [element_power_gain(a, 90.0, 20.0, 5.0) for a in az])
+    F, A = element_field(az, 80.0, np.deg2rad([45.0, -45.0]),
+                         rotation_matrix(20, 5, 10), "38.901")
+    assert F.shape == (37, 2, 2) and A.shape == (37,)
+    F0, _ = element_field(az[3], 80.0, np.deg2rad([45.0, -45.0]),
+                          rotation_matrix(20, 5, 10), "38.901")
+    assert np.allclose(F[3], F0)
+    print("mixed-shape (array az, scalar zenith) inputs broadcast: OK")
+
+
 def test_zero_orientation_is_identity():
     ch = CDLChannel("CDL-C", 100, 10, n_tx=8, n_rx=4, tx_pol=2, rx_pol=2,
                     tx_layout=(2, 2), rx_layout=(1, 2), rng=np.random.default_rng(0))
@@ -103,6 +119,7 @@ def test_separate_ue_element():
 if __name__ == "__main__":
     test_matches_tr38901_closed_forms()
     test_pattern_and_array_turn_together()
+    test_mixed_shape_angles_broadcast()
     test_zero_orientation_is_identity()
     test_unit_power_under_random_orientation()
     test_separate_ue_element()
