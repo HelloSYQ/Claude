@@ -50,11 +50,19 @@ def test_pdp_tables_match_reference():
         assert len(ref["delays"]) - off == len(cl), m
         np.testing.assert_allclose(cl[:, 0], ref["delays"][off:], atol=1e-9, err_msg=m)
         np.testing.assert_allclose(cl[:, 1], ref["powers"][off:], atol=1e-9, err_msg=m)
+        for col, key in ((2, "aod"), (3, "aoa"), (4, "zod"), (5, "zoa")):
+            np.testing.assert_allclose(cl[:, col], ref[key][off:], atol=1e-9,
+                                       err_msg=f"{m} {key}")
+        assert np.allclose(_CDL[m]["spread"],
+                           (ref["cASD"], ref["cASA"], ref["cZSD"], ref["cZSA"])), m
+        assert abs(_CDL[m]["xpr_db"] - ref["xpr"]) < 1e-9, m
         if off:
             assert ref["delays"][0] == 0 and abs(ref["powers"][0]
                                                  - _CDL[m]["los_power_db"]) < 1e-9, m
-    print(f"PDP tables (delays, powers, LOS) == TR 38.901 reference "
-          f"({os.path.basename(ref_dir)}): OK")
+            assert np.allclose(_CDL[m]["los_angles"],
+                               [ref[k][0] for k in ("aod", "aoa", "zod", "zoa")]), m
+    print(f"CDL tables (delays, powers, angles, spreads, XPR, LOS) == TR 38.901 "
+          f"reference ({os.path.basename(ref_dir)}): OK")
 
 
 def test_table_normalisation():
