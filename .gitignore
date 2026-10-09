@@ -28,3 +28,5 @@ notebooks/*.html
 !results/codeword_mapping_8layer_fixed8.png
 !results/codeword_mapping_rank_compare.png
 !results/codeword_mapping_1024qam.png
+build/
+*.egg-info/
