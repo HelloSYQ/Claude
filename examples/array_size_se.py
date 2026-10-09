@@ -21,7 +21,9 @@ Channels:
 Spectral efficiency = delivered bits / (time x allocated bandwidth), b/s/Hz.
 Each CDL-C point averages N_DROPS independent drops; drop d uses the same
 channel seed at every SNR and array size, so the curves are a paired
-comparison. Writes results/array_size_se.png.
+comparison. Writes results/array_size_se.png (MCS table 2, up to 256QAM) or,
+with --mcs-table 4 (1024QAM extension, illustrative values),
+results/array_size_se_1024qam.png.
 """
 import os, sys
 os.environ.setdefault("OMP_NUM_THREADS", "1")          # one BLAS thread per worker
@@ -38,13 +40,15 @@ ARRAYS = {"4T4R": (4, (1, 2)), "32T4R": (32, (2, 8)), "128T4R": (128, (4, 16))}
 CHANNELS = ("CDL-C", "AWGN")
 SNRS = [0, 4, 8, 12, 16, 20, 24]
 N_DROPS, N_SLOTS, N_RB = 8, 150, 273
+MCS_TABLE = 2           # set from --mcs-table in __main__
 
 
-def make_cfg(channel, name, drop):
+def make_cfg(channel, name, drop, mcs_table):
     n_tx, layout = ARRAYS[name]
     c = SimConfig(num_slots=N_SLOTS, seed=1000 + drop)
     c.carrier.n_size_grid = c.pdsch.num_rb = N_RB
     c.pdsch.num_layers = 4
+    c.pdsch.mcs_table = mcs_table
     c.channel.model, c.channel.delay_spread_ns = channel, 30.0
     c.channel.ue_speed_kmh, c.channel.carrier_freq_hz = 3.0, 3.5e9
     a = c.antenna
@@ -54,21 +58,22 @@ def make_cfg(channel, name, drop):
 
 
 def work(task):
-    channel, name, snr, drop = task
-    r = NRDownlinkSimulator(make_cfg(channel, name, drop)).run_point(float(snr), 0)
+    channel, name, snr, drop, mcs_table = task
+    r = NRDownlinkSimulator(make_cfg(channel, name, drop, mcs_table)).run_point(
+        float(snr), 0)
     return channel, name, snr, r
 
 
-def se_ceiling():
-    """SE of 4 layers at the top MCS of table 2 (256QAM, MCS 27)."""
-    top = mcs_tables.get_mcs(mcs_tables.num_mcs(2) - 1, 2)
+def se_ceiling(table):
+    """SE of 4 layers at the top MCS of the given table."""
+    top = mcs_tables.get_mcs(mcs_tables.num_mcs(table) - 1, table)
     tb = tbs_mod.compute_tbs(tbs_mod.re_per_rb(13, 24, 0), N_RB, top.modulation_order,
                              top.target_code_rate, 4)
-    return tb / 0.5e-3 / (N_RB * 12 * 30e3)
+    return top, tb / 0.5e-3 / (N_RB * 12 * 30e3)
 
 
 def main():
-    tasks = [(ch, n, s, d) for ch in CHANNELS for n in ARRAYS for s in SNRS
+    tasks = [(ch, n, s, d, MCS_TABLE) for ch in CHANNELS for n in ARRAYS for s in SNRS
              for d in range(N_DROPS if ch != "AWGN" else 2)]
     with ProcessPoolExecutor(max_workers=os.cpu_count()) as ex:
         out = list(ex.map(work, tasks, chunksize=2))
@@ -76,7 +81,7 @@ def main():
     for channel, name, snr, r in out:
         agg.setdefault((channel, name, snr), []).append(r)
 
-    print(f"{N_RB} PRB ({N_RB * 12 * 30e-3:.1f} MHz), 4R UE, {N_SLOTS} slots per run; "
+    print(f"MCS table {MCS_TABLE}; {N_RB} PRB ({N_RB * 12 * 30e-3:.1f} MHz), 4R UE, {N_SLOTS} slots per run; "
           f"CDL-C: {N_DROPS} drops per point\n")
     print(f"{'channel':7} {'array':7} {'SNR':>4} | {'SE b/s/Hz':>9} | {'rank':>4} "
           f"{'MCS':>5} {'BLER1st':>7} {'resBLER':>7}")
@@ -122,9 +127,9 @@ def plot(res):
                       mfc=col if channel == "CDL-C" else "white", mew=1.8)
             a1.plot(SNRS, se, **kw)
             a2.plot(SNRS, rk, **kw)
-    cap = se_ceiling()
+    top, cap = se_ceiling(MCS_TABLE)
     a1.axhline(cap, ls=":", lw=1, color=ink2)
-    a1.text(SNRS[0], cap, f"  4 layers x 256QAM (MCS 27) ceiling: {cap:.2f} b/s/Hz",
+    a1.text(SNRS[0], cap, f"  4 layers x {top.modulation_name} (MCS {top.index}) ceiling: {cap:.2f} b/s/Hz",
             va="bottom", fontsize=9, color=ink2)
     a1.set_ylim(0, cap * 1.08)
     a1.set_ylabel("spectral efficiency (b/s/Hz)", color=ink2)
@@ -138,12 +143,19 @@ def plot(res):
                 for ch in CHANNELS]
     a1.legend(handles=handles, frameon=False, loc="lower right", fontsize=9, ncol=2)
     fig.suptitle("4T4R vs 32T4R vs 128T4R, CDL-C (solid) and AWGN (dashed) — "
-                 "4R UE, 100 MHz, SVD precoding, CQI/OLLA link adaptation", color=ink)
+                 f"4R UE, 100 MHz, SVD, CQI/OLLA, MCS table {MCS_TABLE} "
+                 f"(up to {top.modulation_name})", color=ink)
     fig.tight_layout()
     os.makedirs("results", exist_ok=True)
-    fig.savefig("results/array_size_se.png", dpi=120, facecolor="#fcfcfb")
-    print("saved results/array_size_se.png")
+    out = "results/array_size_se" + ("_1024qam" if MCS_TABLE == 4 else "") + ".png"
+    fig.savefig(out, dpi=120, facecolor="#fcfcfb")
+    print("saved", out)
 
 
 if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--mcs-table", type=int, default=2, choices=[2, 4],
+                    help="2: up to 256QAM, 4: + 1024QAM (illustrative values)")
+    MCS_TABLE = ap.parse_args().mcs_table
     main()
