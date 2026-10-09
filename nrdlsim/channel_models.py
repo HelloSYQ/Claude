@@ -168,12 +168,20 @@ class TDLChannel:
 
 
 def awgn_frequency_response(n_freq: int, n_tx: int, n_rx: int) -> np.ndarray:
-    """Flat identity-like channel for the AWGN reference model."""
-    h = np.zeros((n_freq, n_rx, n_tx), dtype=complex)
-    d = min(n_tx, n_rx)
-    for i in range(d):
-        h[:, i, i] = 1.0
-    return h
+    """Static, frequency-flat MIMO channel for the AWGN reference model.
+
+    Every tx-rx link has unit gain (|H_us| = 1), the same per-link power
+    normalisation as the fading models (E|H_us|^2 = 1), and the rows (or
+    columns, if n_rx > n_tx) are orthogonal: H is the first n_rx rows / n_tx
+    columns of an N-point DFT matrix, N = max(n_tx, n_rx).  So each of the
+    min(n_tx, n_rx) eigenmodes has gain N: no fading and no angular structure,
+    but the full array gain.  SISO reduces to H = 1.
+    """
+    n = max(n_tx, n_rx)
+    u = np.arange(n_rx)[:, None]
+    s = np.arange(n_tx)[None, :]
+    h = np.exp(-2j * np.pi * u * s / n)
+    return np.broadcast_to(h, (n_freq, n_rx, n_tx)).copy()
 
 
 # ===========================================================================

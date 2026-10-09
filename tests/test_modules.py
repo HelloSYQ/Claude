@@ -40,6 +40,19 @@ def test_mcs_and_tbs():
     print(f"MCS/TBS: OK (TBS={tb} bits)")
 
 
+def test_awgn_mimo_channel():
+    """AWGN MIMO: unit gain on every link (same normalisation as the fading
+    models), orthogonal rows -> every eigenmode carries the full array gain."""
+    from nrdlsim.channel_models import awgn_frequency_response
+    assert np.allclose(awgn_frequency_response(5, 1, 1), 1.0)       # SISO
+    for nt, nr in ((2, 2), (4, 4), (32, 4), (128, 4), (2, 4)):
+        H = awgn_frequency_response(3, nt, nr)
+        assert H.shape == (3, nr, nt) and np.allclose(np.abs(H), 1.0)
+        g = np.linalg.svd(H[0], compute_uv=False) ** 2
+        assert np.allclose(g, max(nt, nr)), (nt, nr, g)
+    print("AWGN MIMO channel: unit link gain, equal eigen-gains: OK")
+
+
 def test_tdl_power_normalised():
     ch = TDLChannel("TDL-C", 100e0, 50.0, n_tx=4, n_rx=2,
                     rng=np.random.default_rng(1))
@@ -221,6 +234,7 @@ if __name__ == "__main__":
     test_constellation_unit_energy()
     test_modulation_roundtrip_no_noise()
     test_mcs_and_tbs()
+    test_awgn_mimo_channel()
     test_tdl_power_normalised()
     test_cdl_channel()
     test_cdl_dualpol_upa()

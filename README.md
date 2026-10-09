@@ -177,6 +177,13 @@ Observed behaviour (all physically consistent):
 
 * SE rises with SNR and saturates near the rank·log₂(M)·R ceiling.
 * AWGN > TDL fading; SE scales with MIMO rank (1×1 ≈ 4, 2×2 ≈ 8, 4×4 ≈ 16 b/s/Hz).
+* **AWGN with multiple antennas** is a static, frequency-flat channel. Every
+  transmit–receive link has unit gain, the same per-link normalisation as the
+  fading models, and the rows are orthogonal (a truncated DFT matrix). So each
+  of the min(N_tx, N_rx) eigenmodes carries the full array gain max(N_tx, N_rx),
+  with no fading and no angular structure. `examples/array_size_se.py` compares
+  4T4R / 32T4R / 128T4R under AWGN and CDL-C
+  (`results/array_size_se.png`).
 * Rank adaptation uses rank 1 at low SNR and switches to rank 2 as SNR rises.
 * `BLER1st` is the first-transmission BLER, which OLLA drives to the 0.1
   target. In a 200-slot run it still includes OLLA's settling period (≈0.13);
