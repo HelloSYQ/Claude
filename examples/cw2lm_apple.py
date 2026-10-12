@@ -41,8 +41,8 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 from nrdlsim import tbs as tbs_mod                                     # noqa: E402
-from nrdlsim.channel_models import (CDLChannel, ut_handset_array,       # noqa: E402
-                                    UT_HANDSET_ELEMENT)
+from nrdlsim.channel_models import (CDLChannel, MultiTRPChannel,      # noqa: E402
+                                    ut_handset_array, UT_HANDSET_ELEMENT)
 from nrdlsim.layer_mapping import layer_groups                         # noqa: E402
 from nrdlsim.link_abstraction import _amc_table, effective_sinr_miesm  # noqa: E402
 from nrdlsim.receiver import (batch_mmse_sinr, batch_mmse_sinr_est,    # noqa: E402
@@ -75,23 +75,71 @@ RECEIVERS = ("mmse",)
 RX_CSI = ("realistic",)            # the alternative receivers run with this CSI only
 
 
-def make_channel(model: str, seed: int, speed_kmh: float) -> CDLChannel:
-    rng = np.random.default_rng(seed)
+def _trp_link(model: str, seed: int, speed_kmh: float, travel_az: float,
+              ue_az: float = 0.0, rng=None) -> CDLChannel:
     return CDLChannel(model, DS_NS, speed_kmh / 3.6 * FC / 3e8, n_tx=32, n_rx=4,
                       carrier_freq_hz=FC, tx_pol=2, tx_layout=(2, 8),
                       spacing_v=0.8, spacing_h=0.5, tx_pattern="38.901",
                       rx_elements=ut_handset_array(FC, indices=(1, 3, 5, 7)),
-                      rx_pattern="38.901",
+                      rx_pattern="38.901", rx_boresight_az_deg=ue_az,
                       rx_element_max_gain_dbi=UT_HANDSET_ELEMENT["g_max_dbi"],
                       rx_element_hpbw_deg=UT_HANDSET_ELEMENT["hpbw_deg"],
                       rx_element_front_back_db=UT_HANDSET_ELEMENT["front_back_db"],
-                      travel_az_deg=float(rng.uniform(-180, 180)), rng=rng)
+                      travel_az_deg=travel_az, rng=rng or np.random.default_rng(seed))
+
+
+def make_channel(model: str, seed: int, speed_kmh: float, scen: dict | None = None):
+    """Single TRP (default), or two TRPs for coherent joint transmission.
+
+    ``scen = {"kind": "cjt", "trp2_db": 6, "trp2_delay_ns": 0, "trp2_model": None}``:
+    TRP 2 is an independent CDL link (own seed) whose signal reaches the UE
+    from the opposite side (the scene of link 2 is rotated by 180 deg: UE
+    orientation and travel direction), ``trp2_db`` weaker and
+    ``trp2_delay_ns`` later than TRP 1.  TRP 1 is exactly the single-TRP
+    channel of the same seed.
+    """
+    rng = np.random.default_rng(seed)
+    travel = float(rng.uniform(-180, 180))
+    ch1 = _trp_link(model, seed, speed_kmh, travel, rng=rng)
+    if not scen or scen.get("kind", "strp") == "strp":
+        return ch1
+    ch2 = _trp_link(scen.get("trp2_model") or model, 0, speed_kmh, travel + 180.0,
+                    ue_az=180.0, rng=np.random.default_rng([seed, 2]))
+    return MultiTRPChannel([ch1, ch2], gains_db=[0.0, -float(scen.get("trp2_db", 0.0))],
+                           delays_ns=[0.0, float(scen.get("trp2_delay_ns", 0.0))])
 
 
 def wideband_svd(H: np.ndarray, rank: int) -> np.ndarray:
     """Wideband SVD precoder (PRG = wideband): top eigenvectors of sum H^H H."""
     _, vec = np.linalg.eigh(np.einsum("fus,fut->st", np.conj(H), H))
     return vec[:, ::-1][:, :rank] / np.sqrt(rank)
+
+
+def precoders(H: np.ndarray, ch, scen: dict | None = None) -> list:
+    """Wideband precoders for ranks 1..4.
+
+    Single TRP: SVD, unit total power.  CJT: the joint SVD over both TRPs'
+    ports, then each TRP's part scaled to that TRP's full power (unit power
+    per TRP; 'per_trp', default), or the joint SVD with the power of both
+    TRPs shared freely (total power 2; 'total', an upper bound).
+    """
+    if not scen or scen.get("kind", "strp") == "strp":
+        return [wideband_svd(H, r) for r in (1, 2, 3, 4)]
+    _, vec = np.linalg.eigh(np.einsum("fus,fut->st", np.conj(H), H))
+    vec = vec[:, ::-1]
+    out = []
+    for r in (1, 2, 3, 4):
+        w = vec[:, :r] / np.sqrt(r)
+        if scen.get("power", "per_trp") == "per_trp":
+            w = w.copy()
+            for sl in ch.port_slices:
+                nrm = np.linalg.norm(w[sl])
+                if nrm > 1e-12:
+                    w[sl] /= nrm
+        else:
+            w = w * np.sqrt(len(ch.port_slices))
+        out.append(w)
+    return out
 
 
 class Table:
@@ -169,7 +217,8 @@ def report_view(rep: dict, rank: int, max_cw: int, rx: str = "mmse"):
 
 
 def _worker(args):
-    model, speed, seeds, n_slots, warm, receivers = args
+    model, speed, seeds, n_slots, warm, receivers = args[:6]
+    scen = args[6] if len(args) > 6 else None
     f = (np.arange(N_RB) - N_RB / 2 + 0.5) * 12 * SCS
     n_snr = len(SNRS)
     keys = [(rx, c, r, m) for rx in receivers for c, r in CONFIGS for m in MAPPINGS
@@ -179,9 +228,12 @@ def _worker(args):
     nack = {k: np.zeros(n_snr) for k in keys}
     rank_sum = {k: np.zeros(n_snr) for k in keys}
     genie = np.zeros((4, 3, n_snr))       # Nokia-style: ideal CSI, ideal AMC, fixed r
+    # diagnostics at the realistic reports: rank-4 per-layer SINR (dB) and the
+    # share of each rank-4 layer's transmit power on TRP 2 (multi-TRP)
+    diag = {"n": np.zeros(n_snr), "sinr4": np.zeros((n_snr, 4)), "trp2": np.zeros((n_snr, 4))}
     from nrdlsim.link_abstraction import ideal_amc
     for seed in seeds:
-        ch = make_channel(model, int(seed), speed)
+        ch = make_channel(model, int(seed), speed, scen)
         rng = np.random.default_rng(10_000 + int(seed))
         # alternative receivers draw their ACKs from their own streams, so
         # the LMMSE results do not depend on which receivers run
@@ -193,7 +245,7 @@ def _worker(args):
         olla = {(j, k): np.zeros(4) for j in range(n_snr) for k in keys}
         for t in range(n_slots):
             H = ch.frequency_response(f, t * SLOT)                    # (F, 4, 32)
-            W = [wideband_svd(H, r) for r in (1, 2, 3, 4)]
+            W = precoders(H, ch, scen)
             for j, snr in enumerate(SNRS):
                 n0 = 10.0 ** (-snr / 10.0)
                 # CSI measured now (ideal CSI-RS): per-rank layer SINRs
@@ -203,6 +255,12 @@ def _worker(args):
                     rep = {"W": W, "G": G, "n0": n0, "sinr": meas, "cache": {}, "stores": {}}
                     report[(j, "ideal")] = rep
                     if t % CSI_PERIOD == 0:
+                        if t >= warm:
+                            diag["n"][j] += 1
+                            diag["sinr4"][j] += 10 * np.log10(meas[3].mean(0))
+                            if hasattr(ch, "port_slices"):
+                                p2 = np.sum(np.abs(W[3][ch.port_slices[1]]) ** 2, axis=0)
+                                diag["trp2"][j] += p2 / np.sum(np.abs(W[3]) ** 2, axis=0)
                         pending[j].append((t + CSI_DELAY, rep))
                     if pending[j] and pending[j][0][0] <= t:
                         report[(j, "realistic")] = pending[j].pop(0)[1]
@@ -269,15 +327,15 @@ def _worker(args):
                                     nack[k][j] += (not ack)
                             if t >= warm:
                                 rank_sum[k][j] += r
-    return bits, ntx, nack, rank_sum, genie
+    return bits, ntx, nack, rank_sum, genie, diag
 
 
 def run(model: str, speed: float, n_drops: int, n_slots: int, warm: int, jobs: int,
-        receivers=RECEIVERS):
+        receivers=RECEIVERS, scen: dict | None = None):
     seeds = np.arange(n_drops)
     chunks = [seeds[i::jobs] for i in range(jobs) if len(seeds[i::jobs])]
     with ProcessPoolExecutor(max_workers=jobs) as ex:
-        parts = list(ex.map(_worker, [(model, speed, c, n_slots, warm, tuple(receivers))
+        parts = list(ex.map(_worker, [(model, speed, c, n_slots, warm, tuple(receivers), scen)
                                       for c in chunks]))
     n_tx_slots = n_drops * (n_slots - warm)
     out = {}
@@ -297,6 +355,9 @@ def run(model: str, speed: float, n_drops: int, n_slots: int, warm: int, jobs: i
     out["nokia_fixed_rank"] = {m: {str(r): g[r - 1, mi].tolist() for r in (1, 2, 3, 4)}
                                for mi, m in enumerate(MAPPINGS)}
     out["nokia_envelope"] = {m: g[:, mi].max(axis=0).tolist() for mi, m in enumerate(MAPPINGS)}
+    n = np.maximum(sum(p[5]["n"] for p in parts), 1)[:, None]
+    out["diag"] = {"rank4_layer_sinr_db": (sum(p[5]["sinr4"] for p in parts) / n).tolist(),
+                   "rank4_trp2_power_share": (sum(p[5]["trp2"] for p in parts) / n).tolist()}
     return out
 
 
