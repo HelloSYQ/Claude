@@ -87,12 +87,22 @@ def bicm_capacity(snr_db, qm: int) -> np.ndarray:
     return np.interp(snr_db, grid_db, cap)
 
 
-def effective_sinr_miesm(sinr_lin: np.ndarray, qm: int) -> float:
-    """MIESM compression of per-RE SINRs to a single effective SINR (dB)."""
+def effective_sinr_miesm(sinr_lin: np.ndarray, qm: int,
+                         weights: np.ndarray | None = None) -> float:
+    """MIESM compression of per-RE SINRs to a single effective SINR (dB).
+
+    ``weights`` (same shape as ``sinr_lin``) weight the per-sample mutual
+    information, e.g. the detection-order samples of :func:`rml_sinr_samples`.
+    """
     sinr_lin = np.asarray(sinr_lin, float).reshape(-1)
     sinr_lin = np.clip(sinr_lin, 1e-6, 1e6)
     per_re_mi = bicm_capacity(10 * np.log10(sinr_lin), qm)   # bits/symbol
-    mean_mi = np.clip(per_re_mi.mean(), 1e-6, qm - 1e-6)
+    if weights is None:
+        mean_mi = per_re_mi.mean()
+    else:
+        w = np.broadcast_to(np.asarray(weights, float), per_re_mi.shape).reshape(-1)
+        mean_mi = np.sum(per_re_mi * w) / np.sum(w)
+    mean_mi = np.clip(mean_mi, 1e-6, qm - 1e-6)
     # invert: find SNR whose BICM capacity == mean_mi
     grid_db, cap = _bicm_table(qm)
     eff_db = np.interp(mean_mi, cap, grid_db)
@@ -156,7 +166,7 @@ def _amc_table(mcs_table: int, n_layers: int, n_re_per_rb: int, n_prb: int):
 
 
 def ideal_amc(sinr_lin, n_layers: int, n_re_per_rb: int, n_prb: int,
-              mcs_table: int = 2):
+              mcs_table: int = 2, weights=None):
     """Ideal AMC for one codeword: the MCS with the largest expected TB bits.
 
     ``sinr_lin`` are the post-equaliser SINRs of every RE (or RB) the
@@ -166,9 +176,64 @@ def ideal_amc(sinr_lin, n_layers: int, n_re_per_rb: int, n_prb: int,
     (mcs_index, tbs, bler, expected_bits).
     """
     qm_of, tbs, thr, slope = _amc_table(mcs_table, n_layers, n_re_per_rb, n_prb)
-    eff = {qm: effective_sinr_miesm(sinr_lin, qm) for qm in np.unique(qm_of)}
+    eff = {qm: effective_sinr_miesm(sinr_lin, qm, weights) for qm in np.unique(qm_of)}
     e = np.array([eff[q] for q in qm_of])
     bler = 1.0 / (1.0 + np.exp(slope * (e - thr)))
     bits = tbs * (1.0 - bler)
     i = int(np.argmax(bits))
     return i, int(tbs[i]), float(bler[i]), float(bits[i])
+
+
+def mcs_bler(sinr_lin, n_layers: int, mcs: int, n_re_per_rb: int, n_prb: int,
+             mcs_table: int = 2, weights=None) -> float:
+    """BLER of a codeword at a given MCS on the SINRs ``sinr_lin``."""
+    qm_of, tbs, thr, slope = _amc_table(mcs_table, n_layers, n_re_per_rb, n_prb)
+    e = effective_sinr_miesm(sinr_lin, int(qm_of[mcs]), weights)
+    return float(1.0 / (1.0 + np.exp(slope[mcs] * (e - thr[mcs]))))
+
+
+def sic_amc(sinr_after, groups, n_re_per_rb: int, n_prb: int,
+            mcs_table: int = 2):
+    """Ideal AMC and expected bits for codeword-level MMSE-SIC.
+
+    ``groups`` are the layers of each codeword in decoding order and
+    ``sinr_after(cancelled)`` returns the per-layer SINRs [n, n_layers] with
+    the layers ``cancelled`` (a tuple) removed, e.g. via
+    :func:`nrdlsim.receiver.cancelled_sinr`.  Codeword k's MCS is chosen
+    (most expected bits) assuming codewords 1..k-1 were decoded and
+    cancelled.  At decoding, only codewords whose CRC passed are cancelled,
+    so a failure propagates: the expected bits sum over all success
+    patterns of the earlier codewords.  Returns (mcs list, tbs list,
+    expected bits, P(success) per codeword).
+    """
+    cache = {}
+
+    def sinr(cancel):
+        key = tuple(sorted(cancel))
+        if key not in cache:
+            cache[key] = sinr_after(key)
+        return cache[key]
+
+    mcs, tbs = [], []
+    done = []
+    for g in groups:
+        i, tb, _, _ = ideal_amc(sinr(done)[:, g].ravel(), len(g), n_re_per_rb,
+                                n_prb, mcs_table)
+        mcs.append(i)
+        tbs.append(tb)
+        done = done + list(g)
+
+    p_ok = np.zeros(len(groups))
+
+    def walk(k, cancelled, prob):
+        if k == len(groups) or prob == 0.0:
+            return
+        g = groups[k]
+        bl = mcs_bler(sinr(cancelled)[:, g].ravel(), len(g), mcs[k], n_re_per_rb,
+                      n_prb, mcs_table)
+        p_ok[k] += prob * (1.0 - bl)
+        walk(k + 1, cancelled + list(g), prob * (1.0 - bl))
+        walk(k + 1, cancelled, prob * bl)
+
+    walk(0, [], 1.0)
+    return mcs, tbs, float(np.dot(tbs, p_ok)), p_ok

@@ -33,13 +33,16 @@ def batch_mmse_sinr(H_eff: np.ndarray, noise_var: float) -> np.ndarray:
 
 
 def batch_mmse_sinr_est(H_eff: np.ndarray, H_est: np.ndarray,
-                        noise_var: float) -> np.ndarray:
+                        noise_var: float, extra_cov: np.ndarray | None = None
+                        ) -> np.ndarray:
     """Post-MMSE per-layer SINR when the filter is built on a channel estimate.
 
     The LMMSE filter G = (Ĥ^H Ĥ + N0 I)^-1 Ĥ^H uses the estimate ``H_est``;
     signal, inter-layer leakage and noise are then evaluated on the true
     ``H_eff``.  With ``H_est = H_eff`` this equals :func:`batch_mmse_sinr`.
-    Shapes as in :func:`batch_mmse_sinr`.
+    ``extra_cov`` [..., n_rx, n_rx] is interference the filter does not know
+    about (e.g. the residual of an imperfect cancellation); it is added to
+    the noise.  Shapes as in :func:`batch_mmse_sinr`.
     """
     n_layers = H_eff.shape[-1]
     Eh = np.conj(np.swapaxes(H_est, -1, -2))
@@ -48,7 +51,71 @@ def batch_mmse_sinr_est(H_eff: np.ndarray, H_est: np.ndarray,
     diag = np.abs(np.diagonal(GH, axis1=-2, axis2=-1)) ** 2
     interf = np.sum(np.abs(GH) ** 2, axis=-1) - diag
     noise = noise_var * np.sum(np.abs(G) ** 2, axis=-1)
+    if extra_cov is not None:
+        noise = noise + np.real(np.einsum("...kr,...rs,...ks->...k",
+                                          np.conj(G), extra_cov, G))
     return diag / (interf + noise + 1e-12)
+
+
+def cancelled_sinr(H_eff: np.ndarray, H_est: np.ndarray, noise_var: float,
+                   cancelled) -> np.ndarray:
+    """Per-layer MMSE SINR after the layers ``cancelled`` are removed.
+
+    A cancelled layer is reconstructed from its decoded symbols and the
+    channel estimate, so (H_eff - H_est) x of every cancelled layer stays in
+    the signal as unknown interference.  Returns [..., n_layers] with NaN on
+    the cancelled layers.  ``cancelled`` = () is plain MMSE.
+    """
+    n_layers = H_eff.shape[-1]
+    c = sorted(set(cancelled))
+    keep = [k for k in range(n_layers) if k not in c]
+    out = np.full(H_eff.shape[:-2] + (n_layers,), np.nan)
+    if not keep:
+        return out
+    extra = None
+    if c:
+        E = (H_eff - H_est)[..., c]
+        if np.any(E):
+            extra = E @ np.conj(np.swapaxes(E, -1, -2))
+    out[..., keep] = batch_mmse_sinr_est(H_eff[..., keep], H_est[..., keep],
+                                         noise_var, extra)
+    return out
+
+
+def rml_sinr_samples(H_eff: np.ndarray, H_est: np.ndarray, noise_var: float):
+    """Per-layer SINR samples and weights of the (R-)ML receiver abstraction.
+
+    A maximum-likelihood detector reaches the joint mutual information of
+    all layers.  By the chain rule that is the sum of MMSE-SIC terms for any
+    detection order; per layer this abstraction takes the term of each
+    order, averaged over all orders.  Layer k's samples are the MMSE SINRs
+    of k with every subset T of the other layers removed, with weight
+    1 / (r * C(r-1, |T|)), so that sum_k E_w[log2(1 + SINR)] equals
+    log2 det(I + H^H H / N0) for Gaussian inputs.  The BICM capacity
+    applied per sample then caps each layer at its constellation.  Removed
+    layers leave their channel-estimation error as interference.
+
+    Returns (samples [..., r, n_s], weights [r, n_s]).  For r = 1 this is
+    MMSE.  This models an ideal (R-)ML detector; a reduced-complexity
+    implementation loses some of the gain.
+    """
+    from itertools import combinations
+    from math import comb
+    r = H_eff.shape[-1]
+    cache = {}
+    samples, weights = [], []
+    for k in range(r):
+        others = [j for j in range(r) if j != k]
+        s_k, w_k = [], []
+        for m in range(r):
+            for T in combinations(others, m):
+                if T not in cache:
+                    cache[T] = cancelled_sinr(H_eff, H_est, noise_var, T)
+                s_k.append(cache[T][..., k])
+                w_k.append(1.0 / (r * comb(r - 1, m)))
+        samples.append(np.stack(s_k, axis=-1))
+        weights.append(w_k)
+    return np.stack(samples, axis=-2), np.array(weights)
 
 
 def mmse_equalize(y: np.ndarray, H_eff: np.ndarray, noise_var: float):

@@ -32,10 +32,10 @@ self-contained file under `nrdlsim/`:
 | `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, TXRU sub-arrays with electrical tilt, per-element UE arrays such as an edge-mounted **handset**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
 | `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5; `layer_groups` for 1, 2 or one codeword per layer) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
 | `ldpc.py` | **DL-SCH coding**: CRC (24A/24B/16), code-block segmentation, base-graph (BG1/BG2) selection, QC-LDPC encode, normalised min-sum decode, rate matching | TS 38.212 §5, §7.2 |
-| `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression, NR-LDPC BLER model, ideal per-codeword AMC | — |
+| `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression (optionally weighted), NR-LDPC BLER model, ideal per-codeword AMC, SIC AMC with error propagation (`sic_amc`) | — |
 | `csi.py` | **CSI feedback**: rank (RI), precoder (PMI), CQI selection with BLER target and configurable feedback **delay** | TS 38.214 §5.2 |
 | `scheduler.py` | **Resource + MCS scheduling** with outer-loop link adaptation (OLLA) | TS 38.214 |
-| `receiver.py` | DM-RS channel estimation, **MMSE MIMO equalisation** (also with a channel estimate), per-RE post-equaliser SINR | — |
+| `receiver.py` | DM-RS channel estimation, **MMSE MIMO equalisation** (also with a channel estimate), per-RE post-equaliser SINR; alternative receivers: codeword-level **MMSE-SIC** (`cancelled_sinr`) and an **(R-)ML** abstraction (`rml_sinr_samples`) | — |
 | `link_simulator.py` | Per-slot chain integration, HARQ (chase combining), **spectral-efficiency** accounting | — |
 
 ### End-to-end per-slot chain
@@ -237,7 +237,7 @@ python tests/test_modules.py
 python tests/test_link_adaptation.py
 python tests/test_cdl_pdp.py
 python tests/test_antenna_orientation.py
-python -m pytest tests/test_cw2lm.py
+python -m pytest tests/test_cw2lm.py tests/test_receivers.py
 ```
 
 `test_modules.py` validates constellation energy, noiseless modulation
@@ -293,6 +293,14 @@ value at 30, 100 and 300 ns. The recovered K-factors are 13.37 dB (CDL-D) and
 - MMSE with a perfect channel estimate equals ideal MMSE
 - `layer_groups` gives the TS 38.211 split
 - ideal AMC gains from one codeword per layer only when the layers are imbalanced
+
+`test_receivers.py` covers the alternative receivers:
+
+- cancelling layers reduces to MMSE (nothing cancelled) and to MRC (all others cancelled)
+- an imperfect channel estimate leaves a cancellation residual
+- the R-ML samples add up to log2 det(I + HᴴH/N0) for Gaussian inputs, and R-ML gives nothing over MMSE when the layers are orthogonal
+- SIC with one codeword equals MMSE, and error propagation is accounted for
+- weighted MIESM
 
 ---
 
