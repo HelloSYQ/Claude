@@ -29,13 +29,13 @@ self-contained file under `nrdlsim/`:
 | `resource_grid.py` | **Resource grid** + **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
 | `modulation.py` | QPSK/16/64/256-QAM Gray mapping and max-log **soft (LLR) demapping** | TS 38.211 §5.1 |
 | `ofdm.py` | **Time-domain CP-OFDM waveform** (IFFT + cyclic prefix / FFT), RF impairments (**CFO, timing offset**), multipath, EVM measurement | TS 38.211 §5.3 |
-| `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
-| `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
+| `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, TXRU sub-arrays with electrical tilt, per-element UE arrays such as an edge-mounted **handset**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
+| `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5; `layer_groups` for 1, 2 or one codeword per layer) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
 | `ldpc.py` | **DL-SCH coding**: CRC (24A/24B/16), code-block segmentation, base-graph (BG1/BG2) selection, QC-LDPC encode, normalised min-sum decode, rate matching | TS 38.212 §5, §7.2 |
-| `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression, NR-LDPC BLER model | — |
+| `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression, NR-LDPC BLER model, ideal per-codeword AMC | — |
 | `csi.py` | **CSI feedback**: rank (RI), precoder (PMI), CQI selection with BLER target and configurable feedback **delay** | TS 38.214 §5.2 |
 | `scheduler.py` | **Resource + MCS scheduling** with outer-loop link adaptation (OLLA) | TS 38.214 |
-| `receiver.py` | DM-RS channel estimation, **MMSE MIMO equalisation**, per-RE post-equaliser SINR | — |
+| `receiver.py` | DM-RS channel estimation, **MMSE MIMO equalisation** (also with a channel estimate), per-RE post-equaliser SINR | — |
 | `link_simulator.py` | Per-slot chain integration, HARQ (chase combining), **spectral-efficiency** accounting | — |
 
 ### End-to-end per-slot chain
@@ -84,7 +84,12 @@ the calibration) — open:
 
 **[`notebooks/NR_Downlink_Simulator_Guide.ipynb`](notebooks/NR_Downlink_Simulator_Guide.ipynb)**
 
-It renders with outputs directly on GitHub. To re-execute it locally:
+A second notebook,
+**[`notebooks/CW2LM_Nokia_Comparison.ipynb`](notebooks/CW2LM_Nokia_Comparison.ipynb)**,
+explains the modules and results of the codeword-to-layer mapping comparison
+with Nokia R1-2607066 (regenerate with `python notebooks/build_cw2lm_nokia.py`).
+
+They render with outputs directly on GitHub. To re-execute the guide locally:
 
 ```bash
 jupyter nbconvert --to notebook --execute --inplace \
@@ -240,6 +245,7 @@ python tests/test_modules.py
 python tests/test_link_adaptation.py
 python tests/test_cdl_pdp.py
 python tests/test_antenna_orientation.py
+python -m pytest tests/test_cw2lm.py
 ```
 
 `test_modules.py` validates constellation energy, noiseless modulation
@@ -286,6 +292,36 @@ Result at DS = 100 ns: cluster powers match the table to 0.05–0.14 dB rms
 (maximum 0.29 dB). The realised delay spread is within 1% of the configured
 value at 30, 100 and 300 ns. The recovered K-factors are 13.37 dB (CDL-D) and
 22.07 dB (CDL-E), against 13.3 and 22.0 dB in the table.
+
+`test_cw2lm.py` covers the pieces of the codeword-mapping study:
+
+- the TXRU sub-array factor peaks at the electrical tilt
+- a sub-array of one element, or an element list equal to a panel, reproduces the existing CDL channel exactly
+- handset elements point out of their edges
+- MMSE with a perfect channel estimate equals ideal MMSE
+- `layer_groups` gives the TS 38.211 split
+- ideal AMC gains from one codeword per layer only when the layers are imbalanced
+
+---
+
+## Codeword-to-layer mapping vs Nokia R1-2607066 (no SIC)
+
+`examples/cw2lm_nokia.py` repeats Nokia's link-level codeword-to-layer
+mapping evaluation (R1-2607066, Fig. 26 / 28, Tables 3 / 4) with the MMSE
+receiver only. It uses CDL-A, 64T (12,8,2,1,1;4,8), an 8-Rx handset, fixed
+ranks 1–4 and 1 / 2 / 1-per-layer codewords. It compares the results with
+Nokia's digitized curves: see **[docs/cw2lm-nokia.md](docs/cw2lm-nokia.md)**.
+
+- **What matches.** Nokia's trends are reproduced: per-layer codewords help
+  more at higher rank, 2 CW sits between 1 and 4 CW, and rank transitions
+  move to lower SNR.
+- **What does not.** With this simulator's own channel the gain is much
+  smaller: 6 % at 10 dB and zero from 20 dB, against Nokia's 14–25 %. The
+  layers here are far more balanced: σ2² is −4 dB relative to σ1², against
+  about −17 dB implied by Nokia's curves.
+- **Diagnostic.** With Nokia's eigenmode spread imposed, the single-codeword
+  curves follow Nokia's up to about 15 dB. Above that, MIESM gives less
+  multi-codeword gain than Nokia reports.
 
 ---
 

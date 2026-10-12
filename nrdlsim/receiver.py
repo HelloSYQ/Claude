@@ -32,6 +32,25 @@ def batch_mmse_sinr(H_eff: np.ndarray, noise_var: float) -> np.ndarray:
     return diag / (interf + noise + 1e-12)
 
 
+def batch_mmse_sinr_est(H_eff: np.ndarray, H_est: np.ndarray,
+                        noise_var: float) -> np.ndarray:
+    """Post-MMSE per-layer SINR when the filter is built on a channel estimate.
+
+    The LMMSE filter G = (Ĥ^H Ĥ + N0 I)^-1 Ĥ^H uses the estimate ``H_est``;
+    signal, inter-layer leakage and noise are then evaluated on the true
+    ``H_eff``.  With ``H_est = H_eff`` this equals :func:`batch_mmse_sinr`.
+    Shapes as in :func:`batch_mmse_sinr`.
+    """
+    n_layers = H_eff.shape[-1]
+    Eh = np.conj(np.swapaxes(H_est, -1, -2))
+    G = np.linalg.solve(Eh @ H_est + noise_var * np.eye(n_layers), Eh)
+    GH = G @ H_eff
+    diag = np.abs(np.diagonal(GH, axis1=-2, axis2=-1)) ** 2
+    interf = np.sum(np.abs(GH) ** 2, axis=-1) - diag
+    noise = noise_var * np.sum(np.abs(G) ** 2, axis=-1)
+    return diag / (interf + noise + 1e-12)
+
+
 def mmse_equalize(y: np.ndarray, H_eff: np.ndarray, noise_var: float):
     """MMSE equalise one RE.
 

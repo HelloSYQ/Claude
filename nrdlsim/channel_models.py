@@ -483,6 +483,82 @@ def _location_phase(positions: np.ndarray, az_deg: np.ndarray,
     return np.exp(1j * 2 * np.pi * proj)
 
 
+def subarray_factor(az_deg, zen_deg, R, n_sub: int, spacing_v: float,
+                    etilt_deg: float = 90.0) -> np.ndarray:
+    """Array factor of a vertical TXRU sub-array (TR 36.897 / TR 38.901 model).
+
+    Each TXRU drives ``n_sub`` vertically stacked elements, ``spacing_v``
+    wavelengths apart, with the weights
+
+        w_k = 1/sqrt(K) exp(-j 2 pi k d_V cos(theta_etilt)),  k = 0 .. K-1,
+
+    so the port pattern peaks (gain K) at the local zenith ``etilt_deg``
+    (90 = horizon).  Angles are GCS and are rotated into the panel LCS with
+    ``R``.  Returns the complex factor with the shape of ``az_deg``.
+    """
+    _, zen_l = to_local_angles(az_deg, zen_deg, R)
+    k = np.arange(n_sub)
+    phase = 2 * np.pi * spacing_v * (np.cos(np.deg2rad(zen_l))[..., None]
+                                     - np.cos(np.deg2rad(etilt_deg))) * k
+    return np.exp(1j * phase).sum(-1) / np.sqrt(n_sub)
+
+
+# UT handset of the Rel-19 UE antenna model (TR 38.901 clause 7.3): directional
+# elements at the device edges, boresight perpendicular to the edge.  Element
+# numbering runs clockwise around the device seen from the screen side:
+#   1, 2 top edge     (boresight +z)      3, 4 right edge  (boresight +y)
+#   5, 6 bottom edge  (boresight -z)      7, 8 left edge   (boresight -y)
+# so the 4-Rx subset (1, 3, 5, 7) has one element per edge.  Odd-numbered
+# elements are polarized along the local theta direction (zeta = 0), even
+# ones along phi (zeta = 90 deg), so each edge carries both polarizations.
+UT_HANDSET_ELEMENT = dict(g_max_dbi=5.4, hpbw_deg=125.0, front_back_db=22.5)
+
+
+def ut_handset_array(carrier_freq_hz: float, indices=None,
+                     length_m: float = 0.15, width_m: float = 0.07) -> dict:
+    """Element list of the edge-mounted UT handset (see note above).
+
+    The device lies in its LCS y-z plane (screen normal +x, long side along
+    z), so the UT orientation (alpha, beta, gamma) = (0, 0, 0) is an upright
+    handset facing azimuth 0.  ``indices`` selects elements by their 1-based
+    number, e.g. (1, 3, 5, 7) for 4 Rx; default all 8.  Returns the dict
+    accepted by ``CDLChannel(rx_elements=...)``: positions in wavelengths
+    (n, 3), element orientation (bearing, downtilt, slant) in degrees (n, 3)
+    and polarization slant in degrees (n,).
+    """
+    lam = 3e8 / carrier_freq_hz
+    L, W = length_m / 2, width_m / 2
+    table = [  # (y, z, bearing, downtilt, zeta)
+        (-W / 2, L, 0.0, -90.0, 0.0), (W / 2, L, 0.0, -90.0, 90.0),
+        (W, L / 2, 90.0, 0.0, 0.0), (W, -L / 2, 90.0, 0.0, 90.0),
+        (W / 2, -L, 0.0, 90.0, 0.0), (-W / 2, -L, 0.0, 90.0, 90.0),
+        (-W, -L / 2, -90.0, 0.0, 0.0), (-W, L / 2, -90.0, 0.0, 90.0),
+    ]
+    idx = list(range(1, 9)) if indices is None else list(indices)
+    rows = [table[i - 1] for i in idx]
+    pos = np.array([[0.0, y / lam, z / lam] for y, z, *_ in rows])
+    rot = np.array([[b, d, 0.0] for _, _, b, d, _ in rows])
+    zeta = np.array([r[4] for r in rows])
+    return {"positions": pos, "rotation_deg": rot, "pol_slant_deg": zeta}
+
+
+def _element_list_field(az_deg, zen_deg, R_panel, elements: dict,
+                        pattern: str, el: dict):
+    """GCS fields of an array whose elements each have their own orientation.
+
+    Element n is rotated by R_panel @ R_n, with R_n from its (bearing,
+    downtilt, slant) in the panel LCS.  Returns (F (..., n, 2), A (..., n)).
+    """
+    F, A = [], []
+    for rot, zeta in zip(elements["rotation_deg"], elements["pol_slant_deg"]):
+        Rn = R_panel @ rotation_matrix(*rot)
+        f, a = element_field(az_deg, zen_deg, np.array([np.deg2rad(zeta)]),
+                             Rn, pattern, **el)
+        F.append(f[..., 0, :])
+        A.append(a)
+    return np.stack(F, axis=-2), np.stack(A, axis=-1)
+
+
 class CDLChannel:
     """Time-varying dual-polarized MIMO CDL channel (TR 38.901 7.5 / 7.7.1).
 
@@ -507,6 +583,17 @@ class CDLChannel:
     the element positions, the element pattern and the polarization, so F(.)
     above is really the per-ray GCS field of eq. 7.1-11.  The UE element can
     differ from the gNB element via ``rx_element_*`` (default: same).
+
+    ``tx_subarray`` = K > 1 makes every gNB port a TXRU of K vertically
+    stacked elements ``spacing_v`` apart with electrical tilt
+    ``tx_etilt_deg`` (TXRU virtualization); the port rows are then K *
+    ``spacing_v`` apart, e.g. (M, N, P; Mp, Np) = (12, 8, 2; 4, 8) is
+    ``n_tx=64, tx_pol=2, tx_layout=(4, 8), tx_subarray=3``.  ``rx_elements``
+    replaces the uniform UE panel by an explicit element list with
+    per-element position, orientation and polarization (see
+    :func:`ut_handset_array`); the UE orientation ``rx_boresight_az_deg``,
+    ``rx_downtilt_deg``, ``rx_slant_deg`` = (alpha, beta, gamma) rotates the
+    whole device.
     """
 
     RAYS = 20
@@ -526,6 +613,8 @@ class CDLChannel:
                  rx_element_max_gain_dbi: float | None = None,
                  rx_element_hpbw_deg: float | None = None,
                  rx_element_front_back_db: float | None = None,
+                 tx_subarray: int = 1, tx_etilt_deg: float = 90.0,
+                 rx_elements: dict | None = None,
                  rng=None):
         if model not in _CDL:
             raise ValueError(f"unknown CDL model {model}")
@@ -577,9 +666,15 @@ class CDLChannel:
         self.R_rx = rotation_matrix(rx_boresight_az_deg, rx_downtilt_deg,
                                     rx_slant_deg)
         pos_tx, slant_tx = build_panel(n_tx, tx_pol, tx_layout,
-                                       spacing_v, spacing_h)
-        pos_rx, slant_rx = build_panel(n_rx, rx_pol, rx_layout,
-                                       spacing_v, spacing_h)
+                                       spacing_v * tx_subarray, spacing_h)
+        if rx_elements is None:
+            pos_rx, slant_rx = build_panel(n_rx, rx_pol, rx_layout,
+                                           spacing_v, spacing_h)
+        else:
+            pos_rx = np.asarray(rx_elements["positions"], float)
+            if len(pos_rx) != n_rx:
+                raise ValueError(f"rx_elements has {len(pos_rx)} elements, "
+                                 f"n_rx = {n_rx}")
         self.pos_tx = pos_tx @ self.R_tx.T
         self.pos_rx = pos_rx @ self.R_rx.T
 
@@ -597,8 +692,18 @@ class CDLChannel:
         # --- per-ray GCS field of every element (pattern + polarization) ---
         F_tx, g_tx = element_field(self.aod, self.zod, slant_tx, self.R_tx,
                                    tx_pattern, **tx_el)      # (c,m,s,2), (c,m)
-        F_rx, g_rx = element_field(self.aoa, self.zoa, slant_rx, self.R_rx,
-                                   rx_pattern, **rx_el)      # (c,m,u,2), (c,m)
+        if tx_subarray > 1:
+            af = subarray_factor(self.aod, self.zod, self.R_tx, tx_subarray,
+                                 spacing_v, tx_etilt_deg)     # (c, m)
+            F_tx = F_tx * af[..., None, None]
+            g_tx = g_tx * np.abs(af) ** 2
+        if rx_elements is None:
+            F_rx, g_rx = element_field(self.aoa, self.zoa, slant_rx, self.R_rx,
+                                       rx_pattern, **rx_el)  # (c,m,u,2), (c,m)
+        else:
+            F_rx, g_rx = _element_list_field(self.aoa, self.zoa, self.R_rx,
+                                             rx_elements, rx_pattern, rx_el)
+            g_rx = g_rx.mean(-1)                             # (c, m)
         # per-ray power gain sqrt(g_tx g_rx), kept for inspection; the gain
         # itself is already inside the fields
         self.ray_gain = np.sqrt(g_tx * g_rx)                  # (c, m)
@@ -629,8 +734,19 @@ class CDLChannel:
                               self.los_angles[2], self.los_angles[3])
             Ft_los, g_tx_los = element_field(a0, z0, slant_tx, self.R_tx,
                                              tx_pattern, **tx_el)   # (s, 2)
-            Fr_los, g_rx_los = element_field(a1, z1, slant_rx, self.R_rx,
-                                             rx_pattern, **rx_el)   # (u, 2)
+            if tx_subarray > 1:
+                af0 = subarray_factor(a0, z0, self.R_tx, tx_subarray,
+                                      spacing_v, tx_etilt_deg)
+                Ft_los = Ft_los * af0
+                g_tx_los = g_tx_los * np.abs(af0) ** 2
+            if rx_elements is None:
+                Fr_los, g_rx_los = element_field(a1, z1, slant_rx, self.R_rx,
+                                                 rx_pattern, **rx_el)  # (u, 2)
+            else:
+                Fr_los, g_rx_los = _element_list_field(
+                    np.array(a1), np.array(z1), self.R_rx, rx_elements,
+                    rx_pattern, rx_el)
+                g_rx_los = g_rx_los.mean(-1)
             self.los_coupling = Fr_los @ los_pol @ Ft_los.T           # (u, s)
             self.los_gain = float(np.sqrt(g_tx_los * g_rx_los))
             self.los_a_tx = _location_phase(self.pos_tx, np.array(a0),
