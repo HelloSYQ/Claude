@@ -126,13 +126,18 @@ def plot(res: dict) -> None:
             c.bar(x, v - v[0], width * 0.9, color=slot[k], label=name)
             if name != "sTRP":
                 for xx, yy, s_ in zip(x, v - v[0], sh):
-                    c.annotate(f"{100 * s_:.0f}%", (xx, yy), xytext=(0, -11),
-                               textcoords="offset points", ha="center", fontsize=7, color=ink2)
+                    c.annotate(f"{100 * s_:.0f}%", (xx, yy), xytext=(0, -3),
+                               textcoords="offset points", ha="center", va="top",
+                               rotation=90, fontsize=7, color=ink2)
         c.set_xticks(range(1, 5), [f"layer {n}" for n in range(1, 5)])
         c.set(ylabel="rank-4 layer SINR relative to layer 1 (dB)")
-        c.set_title(f"(c{i + 1}) Layer imbalance at 22 dB (labels: TRP-2 power share)",
-                    loc="left", fontweight="bold")
+        c.set_title(f"(c{i + 1}) Rank-4 layer SINR at 22 dB", loc="left", fontweight="bold")
+        c.text(0.99, 0.02, "labels: share of the layer's power on TRP 2",
+               transform=c.transAxes, ha="right", va="bottom", fontsize=7.5, color=ink2)
         c.legend(fontsize=7.5, loc="lower left")
+        lo = min(min(np.array(r["diag"]["rank4_layer_sinr_db"][j])
+                     - r["diag"]["rank4_layer_sinr_db"][j][0]) for r in scen.values())
+        c.set_ylim(lo - 4, 1)
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "cw2lm_mtrp.png"), dpi=130)
     print("saved results/cw2lm_mtrp.png")
