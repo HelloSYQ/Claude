@@ -237,7 +237,7 @@ python tests/test_modules.py
 python tests/test_link_adaptation.py
 python tests/test_cdl_pdp.py
 python tests/test_antenna_orientation.py
-python -m pytest tests/test_cw2lm.py tests/test_receivers.py
+python -m pytest tests/test_cw2lm.py tests/test_receivers.py tests/test_multitrp.py
 ```
 
 `test_modules.py` validates constellation energy, noiseless modulation
@@ -294,6 +294,9 @@ value at 30, 100 and 300 ns. The recovered K-factors are 13.37 dB (CDL-D) and
 - `layer_groups` gives the TS 38.211 split
 - ideal AMC gains from one codeword per layer only when the layers are imbalanced
 
+`test_multitrp.py` checks that the multi-TRP channel stacks the TRPs' ports
+and applies each TRP's gain, timing, phase and frequency offset.
+
 `test_receivers.py` covers the alternative receivers:
 
 - cancelling layers reduces to MMSE (nothing cancelled) and to MRC (all others cancelled)
@@ -334,6 +337,13 @@ adaptation. It reproduces Apple's observations: large gains at fixed rank 4,
 **[docs/cw2lm-apple.md](docs/cw2lm-apple.md)** explains, step by step, why
 Apple and Nokia disagree. It uses this simulator and the system-level probe
 in NR_DL_SLS.
+
+`examples/cw2lm_mtrp.py` adds **2-TRP coherent joint transmission**. It uses
+`MultiTRPChannel`, a joint wideband SVD precoder with per-TRP power, and a
+second TRP at 0 / −6 / −10 dB. CJT raises SE by 20–70 % but balances the
+layers, so more codewords gain no more than with one TRP: +1 to +6 % with
+LMMSE, up to +14 % with SIC. See
+**[docs/cw2lm-mtrp.md](docs/cw2lm-mtrp.md)**.
 
 ---
 

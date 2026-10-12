@@ -335,7 +335,32 @@ display(Markdown("\n".join(rows)))
 """)
 
 md(r"""
-## 12 · Conclusions
+## 12 · Multi-TRP: 2-TRP coherent joint transmission
+
+`nrdlsim.channel_models.MultiTRPChannel` stacks per-TRP channels along the transmit ports, with per-TRP gain, timing, phase and frequency offset. `examples/cw2lm_mtrp.py` uses it as follows:
+- Two Apple-style 32T TRPs; TRP 2 reaches the UE from the opposite side, 0 / −6 / −10 dB weaker.
+- A joint wideband SVD precoder over the 64 ports, with each TRP at its own full power.
+- CSI every 20 ms with a 4 ms delay, and codeword-aware rank adaptation.
+
+CJT raises SE a lot, but the second TRP fills the weak spatial directions. The layers become more balanced, and more codewords gain no more than with a single TRP. See [`docs/cw2lm-mtrp.md`](../docs/cw2lm-mtrp.md).
+""")
+co(r"""
+display(Image("results/cw2lm_mtrp.png", width=1000))
+rm = json.load(open("results/cw2lm_mtrp.json"))
+snr_m = np.array(rm["snr_db"]); idx = [int(np.flatnonzero(snr_m == x)[0]) for x in (-2, 6, 14, 22, 30)]
+rows = ["| CDL-A, CSI 20 ms / 4 ms, CW-aware RI (−2 / 6 / 14 / 22 / 30 dB) | Alt 3 vs Alt 1 | Alt 1 vs sTRP |",
+        "|---|---|---|"]
+ref = rm["cases"]["CDL-A"]["sTRP"]["realistic/adaptive/alt1"]["se"]
+for name, r in rm["cases"]["CDL-A"].items():
+    a1, a3 = r["realistic/adaptive/alt1"]["se"], r["realistic/adaptive/alt3"]["se"]
+    g3 = [100 * (a3[i] / a1[i] - 1) for i in idx]
+    gc = [100 * (a1[i] / ref[i] - 1) for i in idx]
+    rows.append(f"| {name} | {f(g3)} | {'–' if name == 'sTRP' else f(gc)} |")
+display(Markdown("\n".join(rows)))
+""")
+
+md(r"""
+## 13 · Conclusions
 
 - **Qualitatively Nokia's results are reproduced.** One codeword per layer is never worse than one codeword. Its gain grows with rank and with layer imbalance. Two codewords sit between one and four at rank 4. Multi-codeword mapping moves the rank transitions to lower SNR. The gain disappears once every layer reaches the top MCS.
 - **Quantitatively not, with this simulator's own channel.** The envelope gain is about 6 % at 10 dB and zero from 20 dB, against Nokia's 14–25 %. Our CDL-A / 64T / handset layers are far more balanced: σ2² is −4 dB against about −17 dB.
@@ -343,6 +368,7 @@ md(r"""
 - **The multi-codeword gain is set mainly by the layer imbalance**, as Nokia argue (Observation 36, Proposals 43–44). The UE antenna model, here an assumed reconstruction of TR 38.901 V19.1.0 §7.3, should be checked before a system-level comparison.
 - **SIC needs interfering layers.** With orthogonal SVD layers it gains nothing. With a wideband precoder it brings the multi-codeword gain close to Nokia's MCW + SIC, and an R-ML receiver gives one codeword most of the same gain. Nokia's large SIC gains therefore imply that their layers interfere.
 - **Apple's result is reproduced in Apple's conditions.** With codeword-aware rank adaptation and realistic CSI, little imbalance is left for a per-layer MCS to exploit, and at 30 km/h one codeword per layer loses with LMMSE.
+- **2-TRP CJT does not favour more codewords.** It raises SE by 20–70 %, but by balancing the layers. One codeword per layer gains 1–6 % with LMMSE, at most the single-TRP level, and up to 14 % with SIC.
 """)
 
 nb["cells"] = cells
