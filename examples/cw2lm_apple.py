@@ -398,7 +398,7 @@ def plot(res: dict) -> None:
         b.axhline(0, color=ink2, lw=0.8)
         b.set_title("Gain of Alt 3 over Alt 1", loc="left", fontweight="bold")
         b.set_xlabel("SNR (dB)"); b.set_ylabel("gain (%)")
-        b.set_ylim(-20, 80)
+        b.set_ylim(-30, 80)
         b.legend(fontsize=7.5, loc="upper right")
     fig.tight_layout()
     fig.savefig(os.path.join(OUT, "cw2lm_apple.png"), dpi=130)
