@@ -53,7 +53,7 @@ from nrdlsim.channel_models import (CDLChannel, _CDL, subarray_factor, rotation_
                                     UT_HANDSET_ELEMENT, _element_list_field)
 from nrdlsim.layer_mapping import layer_groups
 from nrdlsim.link_abstraction import ideal_amc
-from nrdlsim.receiver import batch_mmse_sinr, batch_mmse_sinr_est
+from nrdlsim.receiver import batch_mmse_sinr, batch_mmse_sinr_est, rml_sinr_samples
 import cw2lm_nokia as study
 
 SLOT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]; INK2 = "#52514e"
@@ -268,12 +268,81 @@ print("fitted extra attenuation of eigenmodes 1-4 (dB):", res["variants"]["match
 """)
 
 md(r"""
-## 10 · Conclusions
+## 10 · Alternative receivers: MMSE-SIC and R-ML
+
+`nrdlsim.receiver` has two alternatives to LMMSE:
+
+- **`cancelled_sinr`**: the MMSE SINR of the remaining layers after decoded layers are cancelled. The channel-estimation error of a cancelled layer stays as residual interference. `link_abstraction.sic_amc` builds codeword-level SIC on top of it: per-codeword MCS assuming the earlier codewords are cancelled, and expected bits over all CRC-pass patterns, so failures propagate.
+- **`rml_sinr_samples`**: an (R-)ML abstraction. For each layer it takes the MMSE-SIC term of every detection order, with weight 1/(r·C(r−1,|T|)). The layers then add up to log2 det(I + HᴴH/N0), the joint mutual information.
+
+The check below verifies that identity on a random 4×4 channel. It also shows that with orthogonal layers (SVD per PRB) R-ML and SIC give exactly the LMMSE result.
+""")
+co(r"""
+from nrdlsim.link_abstraction import sic_amc
+rng = np.random.default_rng(3)
+Hr = (rng.standard_normal((40, 4, 4)) + 1j * rng.standard_normal((40, 4, 4))) / np.sqrt(2)
+n0 = 0.05
+smp, w = rml_sinr_samples(Hr, Hr, n0)
+joint = np.log2(np.real(np.linalg.det(np.eye(4) + np.conj(np.swapaxes(Hr, -1, -2)) @ Hr / n0)))
+print("R-ML layer terms vs joint MI, max error:", np.max(np.abs((np.log2(1 + smp) * w).sum((-1, -2)) - joint)))
+print("sum MI per RE, LMMSE:", np.log2(1 + batch_mmse_sinr(Hr, n0)).sum(-1).mean().round(2),
+      " ML (joint):", joint.mean().round(2))
+U, s = study.drop_eigenmodes(0, "handset")
+h = U * (s[:, None, :] / 2.0)                     # SVD per PRB: orthogonal layers
+smp, w = rml_sinr_samples(h, h, 0.1)
+print("orthogonal layers: R-ML samples equal MMSE:", np.allclose(smp, smp[..., :1]))
+""")
+md(r"""
+The full 400-drop run includes the receivers on the Nokia set-up with SVD per PRB (`nokia`), with one wideband SVD precoder (`nokia_wb`) and on the `matched` diagnostic.
+
+- With SVD per PRB the layers are orthogonal, and SIC and R-ML give the LMMSE result (panel b).
+- With the wideband precoder the layers interfere. SIC then lifts the multi-codeword gain close to Nokia's MCW + SIC (Table 4), and R-ML gives a single codeword most of that gain (panel a).
+""")
+co(r"""
+display(Image("results/cw2lm_nokia_receivers.png", width=1000))
+rows = ["| Envelope gain over 1 CW with LMMSE, −5 / 10 / 20 / 30 dB | 1 CW | CW per layer |", "|---|---|---|"]
+for name in ("nokia_wb", "nokia_wb+sic", "nokia_wb+rml", "nokia+sic", "nokia+rml"):
+    t = cmp[name]["table4_vs_mmse_1cw_pct"]
+    rows.append(f"| {res['variants'][name]['label']} | {f(t['1cw'])} | {f(t['cw_per_layer'])} |")
+rows.append(f"| Nokia Table 4, MCW + SIC | | {f(study.NOKIA_TABLE4['cw_per_layer_sic'])} |")
+display(Markdown("\n".join(rows)))
+""")
+
+md(r"""
+## 11 · Apple R1-2608231: realistic CSI and codeword-aware rank adaptation
+
+Apple reaches the opposite conclusion: 1 codeword for ranks 1–4. `examples/cw2lm_apple.py` runs Apple's link-level set-up:
+- 32T (2,8,2;2,8), the 4-Rx handset (elements 1, 3, 5, 7), wideband SVD;
+- CSI every 20 ms with a 4 ms delay;
+- per-codeword CQI with OLLA, and codeword-aware rank adaptation per report.
+
+It reproduces Apple's result: large gains at fixed rank 4, a few percent with rank adaptation, and losses at 30 km/h. With the same drops, Nokia's metric (envelope of fixed-rank means, ideal CSI) gives only 2–9 %. Rank adaptation, the layer imbalance of the channel and UE model, the receiver baseline (Nokia's SLS uses SIC) and CSI realism together explain the disagreement. See [`docs/cw2lm-apple.md`](../docs/cw2lm-apple.md), and the system-level probe in NR_DL_SLS (`docs/cw2lm-sls-probe.md`).
+""")
+co(r"""
+display(Image("results/cw2lm_apple.png", width=1000))
+ra = json.load(open("results/cw2lm_apple_rx.json"))
+snr_a = np.array(ra["snr_db"]); idx = [int(np.flatnonzero(snr_a == x)[0]) for x in (-2, 6, 14, 22, 30)]
+rows = ["| Apple set-up, CSI 20 ms / 4 ms, CW-aware RI: gain over Alt 1 LMMSE at −2 / 6 / 14 / 22 / 30 dB | Alt 1 | Alt 3 |",
+        "|---|---|---|"]
+for case, c in ra["cases"].items():
+    base = np.array(c["realistic/adaptive/alt1"]["se"])
+    for rx in ("mmse", "sic", "rml"):
+        pre = "" if rx == "mmse" else rx + ":"
+        g = {m: [100 * (c[f"{pre}realistic/adaptive/{m}"]["se"][i] / base[i] - 1) for i in idx]
+             for m in ("alt1", "alt3")}
+        rows.append(f"| {case}, {study.RX_LABEL[rx]} | {f(g['alt1'])} | {f(g['alt3'])} |")
+display(Markdown("\n".join(rows)))
+""")
+
+md(r"""
+## 12 · Conclusions
 
 - **Qualitatively Nokia's results are reproduced.** One codeword per layer is never worse than one codeword. Its gain grows with rank and with layer imbalance. Two codewords sit between one and four at rank 4. Multi-codeword mapping moves the rank transitions to lower SNR. The gain disappears once every layer reaches the top MCS.
 - **Quantitatively not, with this simulator's own channel.** The envelope gain is about 6 % at 10 dB and zero from 20 dB, against Nokia's 14–25 %. Our CDL-A / 64T / handset layers are far more balanced: σ2² is −4 dB against about −17 dB.
 - **With Nokia's imbalance imposed**, the single-codeword curves and the rank-4 gains of 4 codewords follow Nokia's up to about 15 dB. Above that, and for 2 codewords, our MIESM model credits a codeword spanning very unequal layers with more than Nokia's results show. This is likely a limit of mutual-information averaging at 256QAM and high code rate, but it is not verified: the bit-true LDPC path here is a toy code.
 - **The multi-codeword gain is set mainly by the layer imbalance**, as Nokia argue (Observation 36, Proposals 43–44). The UE antenna model, here an assumed reconstruction of TR 38.901 V19.1.0 §7.3, should be checked before a system-level comparison.
+- **SIC needs interfering layers.** With orthogonal SVD layers it gains nothing. With a wideband precoder it brings the multi-codeword gain close to Nokia's MCW + SIC, and an R-ML receiver gives one codeword most of the same gain. Nokia's large SIC gains therefore imply that their layers interfere.
+- **Apple's result is reproduced in Apple's conditions.** With codeword-aware rank adaptation and realistic CSI, little imbalance is left for a per-layer MCS to exploit, and at 30 km/h one codeword per layer loses with LMMSE.
 """)
 
 nb["cells"] = cells

@@ -322,6 +322,18 @@ Nokia's digitized curves: see **[docs/cw2lm-nokia.md](docs/cw2lm-nokia.md)**.
 - **Diagnostic.** With Nokia's eigenmode spread imposed, the single-codeword
   curves follow Nokia's up to about 15 dB. Above that, MIESM gives less
   multi-codeword gain than Nokia reports.
+- **Receivers.** With SIC (`--receivers mmse,sic,rml`), per-layer codewords
+  gain only when the layers interfere. With a wideband precoder the gain is
+  +21 % at 10 dB, close to Nokia's MCW + SIC; with orthogonal SVD layers it
+  is 0. An R-ML receiver gives one codeword +17 %.
+
+`examples/cw2lm_apple.py` runs Apple R1-2608231's set-up: 32T, 4-Rx handset,
+wideband SVD, CSI every 20 ms with a 4 ms delay, and codeword-aware rank
+adaptation. It reproduces Apple's observations: large gains at fixed rank 4,
+2–6 % with rank adaptation, and losses at 30 km/h.
+**[docs/cw2lm-apple.md](docs/cw2lm-apple.md)** explains, step by step, why
+Apple and Nokia disagree. It uses this simulator and the system-level probe
+in NR_DL_SLS.
 
 ---
 
