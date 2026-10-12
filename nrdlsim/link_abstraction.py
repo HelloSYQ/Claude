@@ -138,3 +138,37 @@ def required_eff_sinr_db(qm: int, code_rate: float, tb_bits: int,
     threshold, slope = _waterfall(qm, code_rate, tb_bits)
     p = min(max(target_bler, 1e-6), 1 - 1e-6)
     return float(threshold + np.log((1 - p) / p) / slope)
+
+
+@lru_cache(maxsize=None)
+def _amc_table(mcs_table: int, n_layers: int, n_re_per_rb: int, n_prb: int):
+    """Per-MCS (Qm, TBS, BLER-threshold, slope) arrays for :func:`ideal_amc`."""
+    from . import mcs_tables, tbs as tbs_mod
+    rows = []
+    for idx in range(mcs_tables.num_mcs(mcs_table)):
+        info = mcs_tables.get_mcs(idx, mcs_table)
+        tb = tbs_mod.compute_tbs(n_re_per_rb, n_prb, info.modulation_order,
+                                 info.target_code_rate, n_layers)
+        thr, slope = _waterfall(info.modulation_order, info.target_code_rate, tb)
+        rows.append((info.modulation_order, tb, thr, slope))
+    a = np.array(rows, float)
+    return a[:, 0].astype(int), a[:, 1], a[:, 2], a[:, 3]
+
+
+def ideal_amc(sinr_lin, n_layers: int, n_re_per_rb: int, n_prb: int,
+              mcs_table: int = 2):
+    """Ideal AMC for one codeword: the MCS with the largest expected TB bits.
+
+    ``sinr_lin`` are the post-equaliser SINRs of every RE (or RB) the
+    codeword occupies, across all of its ``n_layers`` layers.  Each MCS is
+    scored with its MIESM effective SINR at the MCS's modulation order and
+    the LDPC waterfall, expected bits = TBS * (1 - BLER).  Returns
+    (mcs_index, tbs, bler, expected_bits).
+    """
+    qm_of, tbs, thr, slope = _amc_table(mcs_table, n_layers, n_re_per_rb, n_prb)
+    eff = {qm: effective_sinr_miesm(sinr_lin, qm) for qm in np.unique(qm_of)}
+    e = np.array([eff[q] for q in qm_of])
+    bler = 1.0 / (1.0 + np.exp(slope * (e - thr)))
+    bits = tbs * (1.0 - bler)
+    i = int(np.argmax(bits))
+    return i, int(tbs[i]), float(bler[i]), float(bits[i])

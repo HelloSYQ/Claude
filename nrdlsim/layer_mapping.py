@@ -16,6 +16,30 @@ def num_codewords(num_layers: int) -> int:
     return 2 if num_layers >= 5 else 1
 
 
+def layer_groups(num_layers: int, max_codewords: int) -> list[list[int]]:
+    """Layers carried by each codeword when up to ``max_codewords`` are allowed.
+
+    The layers are split into min(max_codewords, num_layers) contiguous
+    groups as evenly as possible, smaller groups first, which is the NR
+    split for two codewords (rank 5 -> {2, 3}, Table 7.3.1.3-1) extended to
+    more codewords.  ``max_codewords = 1`` is NR up to rank 4 (one codeword
+    on all layers); ``max_codewords = num_layers`` is one codeword per layer.
+
+    >>> layer_groups(4, 2)
+    [[0, 1], [2, 3]]
+    >>> layer_groups(3, 2)
+    [[0], [1, 2]]
+    """
+    n_cw = max(1, min(max_codewords, num_layers))
+    sizes = [num_layers // n_cw + (1 if k >= n_cw - num_layers % n_cw else 0)
+             for k in range(n_cw)]
+    out, start = [], 0
+    for n in sizes:
+        out.append(list(range(start, start + n)))
+        start += n
+    return out
+
+
 def layer_map(codewords: list[np.ndarray], num_layers: int) -> np.ndarray:
     """Map codeword symbol streams to a [num_layers, M_symb_per_layer] array.
 
