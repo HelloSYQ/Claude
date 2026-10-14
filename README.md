@@ -246,6 +246,7 @@ python tests/test_link_adaptation.py
 python tests/test_cdl_pdp.py
 python tests/test_antenna_orientation.py
 python -m pytest tests/test_cw2lm.py
+python -m pytest tests/test_fd_interleaving.py
 ```
 
 `test_modules.py` validates constellation energy, noiseless modulation
@@ -302,6 +303,13 @@ value at 30, 100 and 300 ns. The recovered K-factors are 13.37 dB (CDL-D) and
 - `layer_groups` gives the TS 38.211 split
 - ideal AMC gains from one codeword per layer only when the layers are imbalanced
 
+`test_fd_interleaving.py` covers the pieces of the FD interleaving study:
+
+- the NR interleaver reproduces f(j) = rC + c for 32 PRB, L = 4, and is a permutation for any BWP size, offset and L
+- the 4 × 8 block interleaver maps VRB v to PRB 4 (v mod 8) + ⌊v/8⌋
+- code-block segmentation matches hand-worked TS 38.212 examples, and K′·C and ΣE_r add up for every rank and MCS of the study
+- the per-code-block averaging equals an explicit loop over the resource elements
+
 ---
 
 ## Codeword-to-layer mapping vs Nokia R1-2607066 (no SIC)
@@ -322,6 +330,26 @@ Nokia's digitized curves: see **[docs/cw2lm-nokia.md](docs/cw2lm-nokia.md)**.
 - **Diagnostic.** With Nokia's eigenmode spread imposed, the single-codeword
   curves follow Nokia's up to about 15 dB. Above that, MIESM gives less
   multi-codeword gain than Nokia reports.
+
+---
+
+## Frequency-domain (VRB-to-PRB) interleaving
+
+`examples/fd_interleaving.py` compares FD interleavers for a PDSCH that uses
+the whole 32-PRB band: 32T4R, CDL-A at DS 30 ns, PRG 4 with SVD precoding,
+rank adaptation, and the NR codeword-to-layer mapping. The interleavers are
+NR's interleaved VRB-to-PRB mapping (L = 4) and a 1-PRB 4 × 8 block
+interleaver. Each code block's frequency-first RE mapping is modelled from
+TS 38.211/38.212, with a per-code-block BLER. See
+**[docs/fd-interleaving.md](docs/fd-interleaving.md)**.
+
+- **Result.** Neither interleaver brings a measurable gain: at most 0.05 % SE
+  and 0.06 dB at 10 % BLER, the same as ideal interleaving. After 32-port
+  beamforming the channel is nearly flat over 32 PRBs, and every code block
+  already spans all layers and at least ¾ of the band.
+- **Cross-check.** At DS 300 ns ideal interleaving gains up to 0.9 dB. There,
+  the 4 × 8 interleaver's row index lines up with the position inside the
+  4-PRB PRG, where the per-PRG precoder fits the PRG edges worse.
 
 ---
 

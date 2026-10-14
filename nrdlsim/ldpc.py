@@ -13,6 +13,7 @@ when ``fec_mode='ldpc'``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import numpy as np
 
 # Lifting size set (TS 38.212 Table 5.3.2-1)
@@ -80,6 +81,55 @@ def choose_lifting_size(k: int, kb: int) -> int:
         if kb * z >= k:
             return z
     return _LIFTING_SIZES[-1]
+
+
+@dataclass
+class CodeBlockSegmentation:
+    """LDPC code-block segmentation of one transport block (TS 38.212 5.2.2)."""
+
+    bg: int          # LDPC base graph (clause 7.2.2)
+    c: int           # number of code blocks C
+    k_prime: int     # bits per code block K' (payload + CRCs, no filler bits)
+    k: int           # bits per code block with filler bits, K = 22 Zc or 10 Zc
+    zc: int          # lifting size Zc
+
+
+def segment_transport_block(tbs: int, code_rate: float) -> CodeBlockSegmentation:
+    """Base graph, TB CRC and code-block segmentation of a ``tbs``-bit TB.
+
+    The TB CRC is 24 bits above 3824 bits, else 16 (clause 7.2.1).  When the
+    CRC-attached TB exceeds K_cb (8448 for BG1, 3840 for BG2) it is split into
+    C = ceil(B / (K_cb - 24)) code blocks, each with its own 24-bit CRC.
+    """
+    bg = select_base_graph(tbs, code_rate)
+    b = tbs + (24 if tbs > 3824 else 16)
+    k_cb = 8448 if bg == 1 else 3840
+    if b <= k_cb:
+        c, b_prime = 1, b
+    else:
+        c = math.ceil(b / (k_cb - 24))
+        b_prime = b + 24 * c
+    k_prime = b_prime // c
+    if bg == 1:
+        kb = 22
+    else:
+        kb = 10 if b > 640 else 9 if b > 560 else 8 if b > 192 else 6
+    zc = choose_lifting_size(k_prime, kb)
+    return CodeBlockSegmentation(bg, c, k_prime, (22 if bg == 1 else 10) * zc, zc)
+
+
+def rate_match_lengths(g: int, c: int, n_layers: int, qm: int) -> np.ndarray:
+    """Rate-matching output length E_r of each code block (TS 38.212 5.4.2.1).
+
+    The G coded bits of the TB are shared in units of N_L * Q_m bits (one RE
+    on every layer): the first C - mod(G / (N_L Q_m), C) code blocks get the
+    floor share, the rest the ceiling share, so sum(E_r) = G.
+    """
+    unit = n_layers * qm
+    q = g // unit
+    e = np.full(c, unit * (q // c + 1), dtype=int)
+    e[:c - q % c] = unit * (q // c)
+    return e
 
 
 @dataclass
