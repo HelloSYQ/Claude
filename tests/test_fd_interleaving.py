@@ -117,3 +117,42 @@ def test_code_block_prb_fraction():
     assert np.all(fr0[0, :24] > 0) and np.all(fr0[0, 24:] == 0)
     prg = fr1[0].reshape(8, 4)
     assert np.all(prg[:, :3] > 0) and np.all(prg[:, 3] == 0)
+
+
+def test_block_interleaver_32x8_for_256_prb():
+    prb = vrb_to_prb_block_interleaver(32, 8)
+    v = np.arange(256)
+    assert np.array_equal(prb, 32 * (v % 8) + v // 8)
+    assert np.array_equal(prb[:9], [0, 32, 64, 96, 128, 160, 192, 224, 1])
+    assert np.array_equal(np.sort(prb), v)
+
+
+def test_forced_minimum_number_of_code_blocks():
+    nr = segment_transport_block(7944, 0.117)       # BG2, 3 CBs in NR
+    assert nr.c == 3
+    s = segment_transport_block(7944, 0.117, min_cbs=44)
+    assert s.c == 44 and s.bg == 2
+    assert s.k_prime == -(-(7944 + 24 + 24 * 44) // 44)   # ceil(B' / C)
+    assert segment_transport_block(125016, 0.926).c == 15
+    assert segment_transport_block(125016, 0.926, min_cbs=44).c == 44
+    many = segment_transport_block(1_000_000, 0.926, min_cbs=44)
+    assert many.c == segment_transport_block(1_000_000, 0.926).c > 44
+
+
+def test_256_prb_every_symbol_holds_at_least_4_code_blocks():
+    n_sc, n_sym = 12 * 256, 11
+    n_re = tbs_mod.re_per_rb(13, 24, 0) * 256
+    assert n_re == n_sc * n_sym
+    for rank in (1, 2, 3, 4):
+        for i in range(mcs_tables.num_mcs(2)):
+            m = mcs_tables.get_mcs(i, 2)
+            qm = m.modulation_order
+            tb = tbs_mod.compute_tbs(132, 256, qm, m.target_code_rate, rank)
+            s = segment_transport_block(tb, m.target_code_rate, min_cbs=4 * n_sym)
+            assert s.c >= 44 and s.k_prime * s.c >= tb
+            e = rate_match_lengths(n_re * qm * rank, s.c, rank, qm)
+            spans = code_block_spans(e, qm, rank)
+            for sym in range(n_sym):
+                lo, hi = sym * n_sc, (sym + 1) * n_sc
+                n_cb = np.sum((spans[:, 0] < hi) & (spans[:, 1] > lo))
+                assert n_cb >= 4, (rank, i, sym, n_cb)

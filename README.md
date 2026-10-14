@@ -306,8 +306,9 @@ value at 30, 100 and 300 ns. The recovered K-factors are 13.37 dB (CDL-D) and
 `test_fd_interleaving.py` covers the pieces of the FD interleaving study:
 
 - the NR interleaver reproduces f(j) = rC + c for 32 PRB, L = 4, and is a permutation for any BWP size, offset and L
-- the 4 × 8 block interleaver maps VRB v to PRB 4 (v mod 8) + ⌊v/8⌋
+- the 4 × 8 block interleaver maps VRB v to PRB 4 (v mod 8) + ⌊v/8⌋, and the 32 × 8 one maps it to 32 (v mod 8) + ⌊v/8⌋
 - code-block segmentation matches hand-worked TS 38.212 examples, and K′·C and ΣE_r add up for every rank and MCS of the study
+- a forced minimum of 44 code blocks gives at least 4 code blocks in every OFDM symbol at 256 PRB, for every rank and MCS
 - the per-code-block averaging equals an explicit loop over the resource elements
 
 ---
@@ -336,20 +337,22 @@ Nokia's digitized curves: see **[docs/cw2lm-nokia.md](docs/cw2lm-nokia.md)**.
 ## Frequency-domain (VRB-to-PRB) interleaving
 
 `examples/fd_interleaving.py` compares FD interleavers for a PDSCH that uses
-the whole 32-PRB band: 32T4R, CDL-A at DS 30 ns, PRG 4 with SVD precoding,
-rank adaptation, and the NR codeword-to-layer mapping. The interleavers are
-NR's interleaved VRB-to-PRB mapping (L = 4) and a 1-PRB 4 × 8 block
-interleaver. Each code block's frequency-first RE mapping is modelled from
-TS 38.211/38.212, with a per-code-block BLER. See
+the whole band: 32T4R, CDL-A at DS 30 ns, PRG 4 with SVD precoding, rank
+adaptation, and the NR codeword-to-layer mapping. The interleavers are NR's
+interleaved VRB-to-PRB mapping (L = 4) and a 1-PRB R × C block interleaver.
+Each code block's frequency-first RE mapping is modelled from TS 38.211/38.212,
+with a per-code-block BLER. See
 **[docs/fd-interleaving.md](docs/fd-interleaving.md)**.
 
-- **Result.** Neither interleaver brings a measurable gain: at most 0.05 % SE
-  and 0.06 dB at 10 % BLER, the same as ideal interleaving. After 32-port
+- **32 PRB, 4 × 8 interleaver.** No measurable gain: at most 0.05 % SE and
+  0.06 dB at 10 % BLER, the same as ideal interleaving. After 32-port
   beamforming the channel is nearly flat over 32 PRBs, and every code block
   already spans all layers and at least ¾ of the band.
-- **Cross-check.** At DS 300 ns ideal interleaving gains up to 0.9 dB. There,
-  the 4 × 8 interleaver's row index lines up with the position inside the
-  4-PRB PRG, where the per-PRG precoder fits the PRG edges worse.
+- **256 PRB, 32 × 8 interleaver, at least 4 code blocks per OFDM symbol**
+  (`--setup 256prb`). The 32 × 8 interleaver gains 0.9–2.3 % SE between 0
+  and 20 dB and 0.15–0.48 dB at 10 % BLER, about 90 % of the ideal-interleaving
+  gain. NR gains 0.6–1.8 % and 0.10–0.41 dB, about 70 % of it, because it only
+  splits each code block over the two halves of the band.
 
 ---
 

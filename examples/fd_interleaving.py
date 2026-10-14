@@ -1,21 +1,28 @@
 #!/usr/bin/env python3
-"""Frequency-domain (VRB-to-PRB) interleaving: 32T4R, CDL-A, DS 30 ns, 32 PRB.
+"""Frequency-domain (VRB-to-PRB) interleaving: 32T4R, CDL-A, DS 30 ns.
 
-The UE is allocated the whole 32-PRB bandwidth, so the VRB-to-PRB mapping
-does not change which PRBs carry the transport block (TB).  It changes which
-PRBs each LDPC code block (CB) lands on.  The CBs are mapped frequency first
-over the VRBs.  Without interleaving, a CB that spans less than a few OFDM
-symbols sits on one contiguous part of the band, and the TB fails when its
-worst CB fails.  The mappings compared are:
+The UE is allocated the whole bandwidth, so the VRB-to-PRB mapping does not
+change which PRBs carry the transport block (TB).  It changes which PRBs each
+LDPC code block (CB) lands on.  The CBs are mapped frequency first over the
+VRBs.  Without interleaving, a CB that spans less than a few OFDM symbols sits
+on one contiguous part of the band, and the TB fails when its worst CB fails.
+The mappings compared are:
 
   none    non-interleaved, PRB = VRB (reference)
   nr      FD interleaving 1: NR interleaved mapping (TS 38.211 7.3.1.6),
           bundle size L = 4 (L = 2 is not allowed with PRG size 4), R = 2
-  blk4x8  FD interleaving 2: 1-PRB granularity, 4 x 8 block interleaver,
+  blk     FD interleaving 2: 1-PRB granularity, R x C block interleaver,
           VRBs written in rows and read in columns:
-          VRB v -> PRB 4 (v mod 8) + floor(v / 8)
+          VRB v -> PRB R (v mod C) + floor(v / C)
   ideal   every CB sees the slot-average mutual information, i.e. perfect
           per-CB frequency diversity (ideal interleaving)
+
+Two set-ups (``--setup``):
+
+  32prb   32 PRB, 4 x 8 block interleaver, NR CB segmentation
+  256prb  256 PRB, 32 x 8 block interleaver, and at least 4 CBs in every
+          OFDM symbol: C = max(C_NR, 4 x 11 data symbols) (not NR at low
+          rank / MCS), so each CB spans at most 1/4 of a symbol per layer
 
 Link model, per drop (independent CDL-A realisation) and SNR:
 
@@ -35,10 +42,10 @@ The waterfall slope matters here (a steep waterfall makes the worst CB
 dominate), so every result is also given with a 4x steeper waterfall
 (~0.2 dB per BLER decade at K' = 8448).
 
-    python examples/fd_interleaving.py [--drops 1000] [--jobs 4] [--ds 30]
+    python examples/fd_interleaving.py [--setup 32prb|256prb] [--drops 1000] [--ds 30]
 
-Writes results/fd_interleaving.json and results/fd_interleaving.png.  See
-docs/fd-interleaving.md.
+Writes results/<name>.json and results/<name>.png, <name> = fd_interleaving
+or fd_interleaving_256prb.  See docs/fd-interleaving.md.
 """
 
 from __future__ import annotations
@@ -49,6 +56,7 @@ import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass, replace
 
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -73,13 +81,10 @@ OUT = os.path.join(ROOT, "results")
 
 FC = 3.5e9
 SCS = 30e3
-N_RB = 32
-N_SC = 12 * N_RB
 SLOT = 0.5e-3
-BW = N_RB * 12 * SCS
 PRG = 4
-N_RE_PRB = tbs_mod.re_per_rb(13, 24, 0)    # 13 symbols, 2 DM-RS symbols: 132 RE/PRB
-N_RE = N_RE_PRB * N_RB                     # 4224 RE per layer
+N_DATA_SYMBOLS = 11                        # 13 PDSCH symbols minus 2 DM-RS symbols
+N_RE_PRB = tbs_mod.re_per_rb(13, 24, 0)    # 132 RE/PRB
 DS_NS = 30.0
 SPEED_KMH = 3.0
 MCS_TABLE = 2
@@ -87,47 +92,96 @@ RANKS = (1, 2, 3, 4)
 QMS = (2, 4, 6, 8)
 SNRS = np.arange(-10.0, 41.0, 1.0)
 SLOPE_SCALES = (1.0, 4.0)
-FREQS = (np.arange(N_SC) - N_SC / 2 + 0.5) * SCS
+VARIANTS = ("none", "nr", "blk", "ideal")
 
-MAPPINGS = {
-    "none": vrb_to_prb_non_interleaved(N_RB),
-    "nr": vrb_to_prb_nr_interleaved(N_RB, 4),
-    "blk4x8": vrb_to_prb_block_interleaver(4, 8),
-}
-VARIANTS = ("none", "nr", "blk4x8", "ideal")
-LABELS = {
-    "none": "no interleaving",
-    "nr": "FD interleaving 1: NR, L = 4",
-    "blk4x8": "FD interleaving 2: 1 PRB, 4 x 8",
-    "ideal": "ideal interleaving (every CB sees the slot mean)",
-}
 
-ASSUMPTIONS = [
-    ("Carrier", "3.5 GHz, 30 kHz SCS, 32 PRB (11.52 MHz), whole BW allocated"),
-    ("Channel", "CDL-A, DS 30 ns, 3 km/h, one snapshot per drop"),
-    ("gNB array", "32 ports, (M, N, P) = (2, 8, 2), +-45 deg, 0.5 wavelength, omni element"),
-    ("UE array", "4 ports, (1, 2, 2), +-45 deg, 0.5 wavelength, omni element"),
-    ("Precoding", "SVD per PRG of 4 PRBs (PRG-summed covariance), ideal CSI, "
-                  "equal power per layer"),
-    ("Receiver", "LMMSE, ideal channel estimation"),
-    ("CW-to-layer mapping", "NR: one codeword, ranks 1-4"),
-    ("Rank / MCS", "ideal AMC per drop and SNR: rank 1-4 and MCS (Table 2, 256QAM) "
-                   "with the most expected bits, per mapping"),
-    ("PDSCH", "13 symbols, 2 DM-RS symbols (type 1, 2 CDM groups without data): "
-              "132 RE/PRB, 4224 RE per layer"),
-    ("Coding", "TBS per TS 38.214, BG + CB segmentation + E_r per TS 38.212, "
-               "frequency-first RE mapping over VRBs"),
-    ("BLER", "per-CB MIESM + LDPC waterfall at K'/E_r; TB BLER = 1 - prod(1 - BLER_CB)"),
-    ("FD interleaving 1", "NR VRB-to-PRB interleaving, L = 4, R = 2 (TS 38.211 7.3.1.6)"),
-    ("FD interleaving 2", "1-PRB granularity, 4 x 8 block interleaver, write rows / "
-                          "read columns: VRB v -> PRB 4 (v mod 8) + floor(v / 8)"),
-]
+@dataclass(frozen=True)
+class Setup:
+    """Bandwidth, FD interleaver 2 and CB segmentation of one evaluation."""
+
+    name: str                    # output file stem in results/
+    n_rb: int
+    blk_rows: int                # FD interleaving 2: rows x cols block interleaver,
+    blk_cols: int                # 1-PRB granularity, write rows / read columns
+    min_cb_per_symbol: int = 0   # > 0: at least this many CBs per OFDM symbol (not NR)
+    ds_ns: float = DS_NS
+
+    @property
+    def n_sc(self) -> int:
+        return 12 * self.n_rb
+
+    @property
+    def n_re(self) -> int:                 # data RE per layer in the slot
+        return N_RE_PRB * self.n_rb
+
+    @property
+    def bw(self) -> float:
+        return self.n_sc * SCS
+
+    @property
+    def freqs(self) -> np.ndarray:
+        return (np.arange(self.n_sc) - self.n_sc / 2 + 0.5) * SCS
+
+    @property
+    def min_cbs(self) -> int:
+        # every CB then spans at most 1/min_cb_per_symbol of a symbol per layer
+        return max(1, self.min_cb_per_symbol * N_DATA_SYMBOLS)
+
+    def mappings(self) -> dict:
+        return {"none": vrb_to_prb_non_interleaved(self.n_rb),
+                "nr": vrb_to_prb_nr_interleaved(self.n_rb, 4),
+                "blk": vrb_to_prb_block_interleaver(self.blk_rows, self.blk_cols)}
+
+    def labels(self) -> dict:
+        r, c = self.blk_rows, self.blk_cols
+        return {"none": "no interleaving",
+                "nr": "FD interleaving 1: NR, L = 4",
+                "blk": f"FD interleaving 2: 1 PRB, {r} x {c}",
+                "ideal": "ideal interleaving (every CB sees the slot mean)"}
+
+    def assumptions(self) -> list:
+        r, c = self.blk_rows, self.blk_cols
+        seg = ("NR (TS 38.212 5.2.2)" if self.min_cb_per_symbol == 0 else
+               f"NR, but at least {self.min_cbs} CBs per TB ({self.min_cb_per_symbol} per "
+               f"OFDM symbol x {N_DATA_SYMBOLS} data symbols): C = max(C_NR, {self.min_cbs})")
+        return [
+            ("Carrier", f"3.5 GHz, 30 kHz SCS, {self.n_rb} PRB ({self.bw / 1e6:.2f} MHz), "
+                        "whole BW allocated"),
+            ("Channel", f"CDL-A, DS {self.ds_ns:g} ns, 3 km/h, one snapshot per drop"),
+            ("gNB array", "32 ports, (M, N, P) = (2, 8, 2), +-45 deg, 0.5 wavelength, "
+                          "omni element"),
+            ("UE array", "4 ports, (1, 2, 2), +-45 deg, 0.5 wavelength, omni element"),
+            ("Precoding", "SVD per PRG of 4 PRBs (PRG-summed covariance), ideal CSI, "
+                          "equal power per layer"),
+            ("Receiver", "LMMSE, ideal channel estimation"),
+            ("CW-to-layer mapping", "NR: one codeword, ranks 1-4"),
+            ("Rank / MCS", "ideal AMC per drop and SNR: rank 1-4 and MCS (Table 2, 256QAM) "
+                           "with the most expected bits, per mapping"),
+            ("PDSCH", f"13 symbols, 2 DM-RS symbols (type 1, 2 CDM groups without data): "
+                      f"132 RE/PRB, {self.n_re} RE per layer"),
+            ("Coding", "TBS per TS 38.214, BG + E_r per TS 38.212, frequency-first RE "
+                       "mapping over VRBs"),
+            ("CB segmentation", seg),
+            ("BLER", "per-CB MIESM + LDPC waterfall at K'/E_r; "
+                     "TB BLER = 1 - prod(1 - BLER_CB)"),
+            ("FD interleaving 1", "NR VRB-to-PRB interleaving, L = 4, R = 2 "
+                                  "(TS 38.211 7.3.1.6)"),
+            ("FD interleaving 2", f"1-PRB granularity, {r} x {c} block interleaver, write "
+                                  f"rows / read columns: VRB v -> PRB {r} (v mod {c}) "
+                                  f"+ floor(v / {c})"),
+        ]
+
+
+SETUPS = {
+    "32prb": Setup("fd_interleaving", 32, 4, 8),
+    "256prb": Setup("fd_interleaving_256prb", 256, 32, 8, min_cb_per_symbol=4),
+}
 
 
 # ---------------------------------------------------------------------------
 # static tables
 # ---------------------------------------------------------------------------
-def cb_tables() -> dict:
+def cb_tables(setup: Setup) -> dict:
     """Per rank: TBS of every MCS and the CBs of every MCS, concatenated."""
     tabs = {}
     for r in RANKS:
@@ -136,9 +190,11 @@ def cb_tables() -> dict:
         for i in range(mcs_tables.num_mcs(MCS_TABLE)):
             m = mcs_tables.get_mcs(i, MCS_TABLE)
             qm, rate = m.modulation_order, m.target_code_rate
-            tb = tbs_mod.compute_tbs(N_RE_PRB, N_RB, qm, rate, r)
-            seg = segment_transport_block(tb, rate)
-            e = rate_match_lengths(N_RE * qm * r, seg.c, r, qm)
+            tb = tbs_mod.compute_tbs(N_RE_PRB, setup.n_rb, qm, rate, r)
+            seg = segment_transport_block(tb, rate, setup.min_cbs)
+            e = rate_match_lengths(setup.n_re * qm * r, seg.c, r, qm)
+            if setup.min_cb_per_symbol:
+                assert e.max() // (qm * r) * setup.min_cb_per_symbol <= setup.n_sc
             tbs.append(tb)
             first.append(n_cb)
             n_cb += seg.c
@@ -182,7 +238,7 @@ def prg_precoder(H: np.ndarray, rank: int) -> np.ndarray:
 
     H: (n_sc, n_rx, n_tx).  Returns unit-norm columns W (n_sc, n_tx, rank).
     """
-    n_prg = N_RB // PRG
+    n_prg = H.shape[0] // (12 * PRG)
     Hg = H.reshape(n_prg, -1, *H.shape[1:])
     Rg = np.einsum("gfus,gfut->gst", Hg.conj(), Hg)
     _, V = np.linalg.eigh(Rg)                             # ascending eigenvalues
@@ -190,9 +246,9 @@ def prg_precoder(H: np.ndarray, rank: int) -> np.ndarray:
     return np.repeat(W, H.shape[0] // n_prg, axis=0)
 
 
-def drop_channel(seed: int, ds_ns: float = DS_NS) -> np.ndarray:
+def drop_channel(seed: int, setup: Setup) -> np.ndarray:
     """Per-subcarrier channel of one drop, (n_sc, n_rx, n_tx)."""
-    return make_channel(seed, ds_ns).frequency_response(FREQS, 0.0)
+    return make_channel(seed, setup.ds_ns).frequency_response(setup.freqs, 0.0)
 
 
 def layer_mi(H: np.ndarray, rank: int, snrs=SNRS):
@@ -203,12 +259,15 @@ def layer_mi(H: np.ndarray, rank: int, snrs=SNRS):
     return np.stack([bicm_capacity(sdb, q) for q in QMS], axis=1), sinr
 
 
-def cb_eff_sinr(mi: np.ndarray, t: dict, variant: str) -> np.ndarray:
-    """Effective SINR (dB) of every CB of every MCS: (..., n_cb_total)."""
-    if variant == "ideal":
+def cb_eff_sinr(mi: np.ndarray, t: dict, prb: np.ndarray | None) -> np.ndarray:
+    """Effective SINR (dB) of every CB of every MCS: (..., n_cb_total).
+
+    ``prb`` is the VRB-to-PRB mapping; None is ideal interleaving.
+    """
+    if prb is None:
         mean = mi.mean(axis=(-2, -1))[..., t["qi"]]
     else:
-        cbm = code_block_means(mi, t["spans"], MAPPINGS[variant])   # (..., n_qm, n_cb)
+        cbm = code_block_means(mi, t["spans"], prb)       # (..., n_qm, n_cb)
         mean = cbm[..., t["qi"], np.arange(t["qi"].size)]
     return eff_sinr_db(mean, t["qi"])
 
@@ -225,8 +284,9 @@ def tb_bler(eff: np.ndarray, t: dict) -> np.ndarray:
 # simulation
 # ---------------------------------------------------------------------------
 def _worker(args):
-    seeds, ds_ns = args
-    tabs = cb_tables()
+    seeds, setup = args
+    tabs = cb_tables(setup)
+    maps = setup.mappings()
     n_mcs = mcs_tables.num_mcs(MCS_TABLE)
     nv, ns, nr, nq = len(VARIANTS), len(SLOPE_SCALES), len(RANKS), len(SNRS)
     se = np.zeros((len(seeds), nq, nv, ns, nr))           # best SE per rank
@@ -234,15 +294,15 @@ def _worker(args):
     bler = np.zeros((nq, nv, ns, nr, n_mcs))              # sum over drops
     spread = np.zeros((nq, nv, nr, n_mcs))                # max - min CB eff SINR (dB)
     for d, seed in enumerate(seeds):
-        H = drop_channel(seed, ds_ns)
+        H = drop_channel(seed, setup)
         for ir, r in enumerate(RANKS):
             t = tabs[r]
             mi, _ = layer_mi(H, r)
             for iv, v in enumerate(VARIANTS):
-                eff = cb_eff_sinr(mi, t, v)                    # (nq, n_cb)
+                eff = cb_eff_sinr(mi, t, maps.get(v))          # (nq, n_cb)
                 b = tb_bler(eff, t)                            # (ns, nq, n_mcs)
                 bits = t["tbs"] * (1 - b)
-                se[d, :, iv, :, ir] = bits.max(-1).T / SLOT / BW
+                se[d, :, iv, :, ir] = bits.max(-1).T / SLOT / setup.bw
                 mcs[d, :, iv, :, ir] = bits.argmax(-1).T
                 bler[:, iv, :, ir] += np.moveaxis(b, 0, 1)
                 spread[:, iv, ir] += (np.maximum.reduceat(eff, t["first"], axis=-1)
@@ -250,11 +310,11 @@ def _worker(args):
     return se, mcs, bler, spread
 
 
-def run(n_drops: int, n_jobs: int, ds_ns: float = DS_NS):
+def run(setup: Setup, n_drops: int, n_jobs: int):
     seeds = np.arange(n_drops)
     chunks = [seeds[k::n_jobs] for k in range(n_jobs) if len(seeds[k::n_jobs])]
     with ProcessPoolExecutor(max_workers=n_jobs) as ex:
-        parts = list(ex.map(_worker, [(c, ds_ns) for c in chunks]))
+        parts = list(ex.map(_worker, [(c, setup) for c in chunks]))
     order = np.argsort(np.concatenate(chunks))
     se = np.concatenate([p[0] for p in parts])[order]
     mcs = np.concatenate([p[1] for p in parts])[order]
@@ -347,27 +407,31 @@ def print_summary(res: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--setup", choices=SETUPS, default="32prb",
+                    help="32prb: 4 x 8 interleaver, NR segmentation; 256prb: 32 x 8 "
+                         "interleaver, at least 4 CBs per OFDM symbol")
     ap.add_argument("--drops", type=int, default=1000)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--ds", type=float, default=DS_NS,
                     help="delay spread (ns); other values are a cross-check, "
-                         "written to fd_interleaving_ds<DS>.json without a plot")
+                         "written to <name>_ds<DS>.json without a plot")
     ap.add_argument("--no-plot", action="store_true")
     args = ap.parse_args()
+    setup = SETUPS[args.setup]
+    if args.ds != DS_NS:
+        setup = replace(setup, name=f"{setup.name}_ds{args.ds:g}", ds_ns=args.ds)
     t0 = time.time()
-    se, mcs, bler, spread = run(args.drops, args.jobs, args.ds)
-    res = {"assumptions": ASSUMPTIONS, "snr_db": SNRS.tolist(), "n_drops": args.drops,
-           "ds_ns": args.ds,
-           "variants": {v: LABELS[v] for v in VARIANTS},
-           "slope_scales": list(SLOPE_SCALES),
-           "mappings": {k: v.tolist() for k, v in MAPPINGS.items()}}
-    res.update(summarize(se, mcs, bler, spread, cb_tables()))
+    se, mcs, bler, spread = run(setup, args.drops, args.jobs)
+    res = {"setup": asdict(setup), "assumptions": setup.assumptions(),
+           "snr_db": SNRS.tolist(), "n_drops": args.drops, "ds_ns": setup.ds_ns,
+           "variants": setup.labels(), "slope_scales": list(SLOPE_SCALES),
+           "mappings": {k: v.tolist() for k, v in setup.mappings().items()}}
+    res.update(summarize(se, mcs, bler, spread, cb_tables(setup)))
     res["runtime_s"] = round(time.time() - t0, 1)
-    print(f"{args.drops} drops in {res['runtime_s']} s")
+    print(f"{setup.name}: {args.drops} drops in {res['runtime_s']} s")
     print_summary(res)
     os.makedirs(OUT, exist_ok=True)
-    name = "fd_interleaving" if args.ds == DS_NS else f"fd_interleaving_ds{args.ds:g}"
-    with open(os.path.join(OUT, name + ".json"), "w") as fh:
+    with open(os.path.join(OUT, setup.name + ".json"), "w") as fh:
         json.dump(res, fh, separators=(",", ":"))
     if not args.no_plot and args.ds == DS_NS:
         from fd_interleaving_plot import plot   # noqa: E402  (examples/ on sys.path)

@@ -94,22 +94,25 @@ class CodeBlockSegmentation:
     zc: int          # lifting size Zc
 
 
-def segment_transport_block(tbs: int, code_rate: float) -> CodeBlockSegmentation:
+def segment_transport_block(tbs: int, code_rate: float,
+                            min_cbs: int = 1) -> CodeBlockSegmentation:
     """Base graph, TB CRC and code-block segmentation of a ``tbs``-bit TB.
 
     The TB CRC is 24 bits above 3824 bits, else 16 (clause 7.2.1).  When the
     CRC-attached TB exceeds K_cb (8448 for BG1, 3840 for BG2) it is split into
     C = ceil(B / (K_cb - 24)) code blocks, each with its own 24-bit CRC.
+
+    ``min_cbs`` > 1 is not NR: it forces at least that many code blocks
+    (each with a 24-bit CRC; K' rounded up, the remainder being filler bits),
+    for studies that need short code blocks.
     """
     bg = select_base_graph(tbs, code_rate)
     b = tbs + (24 if tbs > 3824 else 16)
     k_cb = 8448 if bg == 1 else 3840
-    if b <= k_cb:
-        c, b_prime = 1, b
-    else:
-        c = math.ceil(b / (k_cb - 24))
-        b_prime = b + 24 * c
-    k_prime = b_prime // c
+    c = 1 if b <= k_cb else math.ceil(b / (k_cb - 24))
+    c = max(c, min_cbs)
+    b_prime = b if c == 1 else b + 24 * c
+    k_prime = math.ceil(b_prime / c)
     if bg == 1:
         kb = 22
     else:
