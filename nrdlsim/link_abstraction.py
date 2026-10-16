@@ -172,3 +172,80 @@ def ideal_amc(sinr_lin, n_layers: int, n_re_per_rb: int, n_prb: int,
     bits = tbs * (1.0 - bler)
     i = int(np.argmax(bits))
     return i, int(tbs[i]), float(bler[i]), float(bits[i])
+
+
+# ---------------------------------------------------------------------------
+# Code-block-aware TB error model (TS 38.212 clause 5.2.2 segmentation)
+# ---------------------------------------------------------------------------
+# A transport block is CRC-attached and split into C LDPC code blocks; the TB
+# fails if any code block fails, so TB BLER = 1 - prod_c (1 - BLER_cb,c).
+# Each code block follows the waterfall of its own (payload) size and sees
+# its own effective SINR (the REs it is mapped to).  ``slope`` overrides the
+# per-CB waterfall slope (1/dB) for sensitivity studies; None keeps the
+# default size-dependent slope of _waterfall.
+
+def cb_segmentation(tbs: int, code_rate: float):
+    """(C, K') = number of code blocks and bits per code block (incl. CRCs)."""
+    a = int(tbs)
+    b = a + (24 if a > 3824 else 16)                       # TB CRC
+    bg2 = a <= 292 or (a <= 3824 and code_rate <= 0.67) or code_rate <= 0.25
+    k_cb = 3840 if bg2 else 8448
+    if b <= k_cb:
+        return 1, b
+    c = int(np.ceil(b / (k_cb - 24)))                      # 24-bit CB CRC each
+    return c, (b + 24 * c) / c
+
+
+def _cb_waterfall(qm, code_rate, k_cb, slope):
+    threshold, s = _waterfall(qm, code_rate, k_cb)
+    return threshold, (s if slope is None else slope)
+
+
+def tb_bler_from_cb_sinrs(cb_eff_sinr_db, qm: int, code_rate: float, tbs: int,
+                          slope: float | None = None) -> float:
+    """TB BLER from the effective SINR of each code block."""
+    c, k_cb = cb_segmentation(tbs, code_rate)
+    e = np.broadcast_to(np.asarray(cb_eff_sinr_db, float), (c,))
+    threshold, s = _cb_waterfall(qm, code_rate, k_cb, slope)
+    p_cb = 1.0 / (1.0 + np.exp(s * (e - threshold)))
+    return float(1.0 - np.prod(1.0 - p_cb))
+
+
+def required_eff_sinr_db_tb(qm: int, code_rate: float, tbs: int,
+                            target_bler: float, slope: float | None = None) -> float:
+    """Common per-CB effective SINR at which the TB BLER equals ``target_bler``.
+
+    Inverse of :func:`tb_bler_from_cb_sinrs` when every code block sees the
+    same effective SINR: each CB must reach 1 - (1 - target)^(1/C).
+    """
+    c, k_cb = cb_segmentation(tbs, code_rate)
+    p = 1.0 - (1.0 - min(max(target_bler, 1e-6), 1 - 1e-6)) ** (1.0 / c)
+    threshold, s = _cb_waterfall(qm, code_rate, k_cb, slope)
+    return float(threshold + np.log((1 - p) / p) / s)
+
+
+def mi_to_eff_sinr_db(mean_mi, qm: int) -> np.ndarray:
+    """Invert the BICM curve: effective SINR (dB) for a mean MI (bits/symbol)."""
+    grid_db, cap = _bicm_table(qm)
+    return np.interp(np.clip(mean_mi, 1e-6, qm - 1e-6), cap, grid_db)
+
+
+def cb_re_weights(n_rb: int, n_cb: int, n_re_per_rb: int) -> np.ndarray:
+    """Fraction of each code block's REs that fall in each RB, shape (C, n_rb).
+
+    Modulation symbols are layer-mapped round-robin, then mapped to REs
+    frequency-first (subcarrier, then OFDM symbol) over the allocation
+    (TS 38.211 7.3.1), and rate matching splits the coded bits evenly over the
+    code blocks.  So code block c occupies one contiguous slice of every
+    layer's RE stream, sweeping across the band and wrapping into the next
+    OFDM symbol.  Data REs are taken as n_re_per_rb / 12 full symbols.
+    """
+    sc = 12 * n_rb                                   # subcarriers per symbol
+    total = n_re_per_rb * n_rb                       # data REs per layer
+    edges = np.linspace(0, total, n_cb + 1)
+    w = np.zeros((n_cb, n_rb))
+    pos = np.arange(total)
+    rb_of = (pos % sc) // 12
+    cb_of = np.searchsorted(edges, pos, side="right") - 1
+    np.add.at(w, (cb_of, rb_of), 1.0)
+    return w / w.sum(axis=1, keepdims=True)

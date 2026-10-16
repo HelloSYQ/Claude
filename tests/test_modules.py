@@ -53,6 +53,32 @@ def test_awgn_mimo_channel():
     print("AWGN MIMO channel: unit link gain, equal eigen-gains: OK")
 
 
+def test_code_block_tb_model():
+    """TS 38.212 segmentation, TB BLER from code blocks and its inverse."""
+    from nrdlsim.link_abstraction import (cb_segmentation, tb_bler_from_cb_sinrs,
+                                          required_eff_sinr_db_tb, cb_re_weights)
+    # B = A + 24; BG1 (K_cb 8448): C = ceil(B / 8424); BG2 (3840): ceil(B / 3816)
+    assert cb_segmentation(200, 0.5) == (1, 216)                  # small TB: 16-bit CRC
+    assert cb_segmentation(100000, 0.9)[0] == 12                  # BG1
+    assert cb_segmentation(100000, 0.2)[0] == 27                  # BG2 (R <= 1/4)
+    c, k = cb_segmentation(100000, 0.9)
+    assert abs(k * c - (100024 + 24 * c)) < 1e-6                  # CB CRCs added
+    # TB BLER combines code blocks; the inverse hits the target exactly
+    for tbs in (5000, 60000, 500000):
+        s = required_eff_sinr_db_tb(6, 0.6, tbs, 0.1)
+        assert abs(tb_bler_from_cb_sinrs(s, 6, 0.6, tbs) - 0.1) < 1e-9
+    # more code blocks need more SINR for the same TB BLER
+    assert required_eff_sinr_db_tb(6, 0.6, 500000, 0.1) > required_eff_sinr_db_tb(6, 0.6, 60000, 0.1)
+    # one bad code block fails the TB
+    c, _ = cb_segmentation(500000, 0.6)
+    e = np.full(c, 30.0); e[3] = -10.0
+    assert tb_bler_from_cb_sinrs(e, 6, 0.6, 500000) > 0.99
+    # CB -> RB footprint: rows are distributions; each CB covers ~1/C of the REs
+    w = cb_re_weights(264, 62, 132)
+    assert np.allclose(w.sum(axis=1), 1.0) and w.shape == (62, 264)
+    print("code-block TB model (segmentation, TB BLER, inverse, RE mapping): OK")
+
+
 def test_tdl_power_normalised():
     ch = TDLChannel("TDL-C", 100e0, 50.0, n_tx=4, n_rx=2,
                     rng=np.random.default_rng(1))
@@ -235,6 +261,7 @@ if __name__ == "__main__":
     test_modulation_roundtrip_no_noise()
     test_mcs_and_tbs()
     test_awgn_mimo_channel()
+    test_code_block_tb_model()
     test_tdl_power_normalised()
     test_cdl_channel()
     test_cdl_dualpol_upa()
