@@ -32,10 +32,10 @@ self-contained file under `nrdlsim/`:
 | `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, TXRU sub-arrays with electrical tilt, per-element UE arrays such as an edge-mounted **handset**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
 | `layer_mapping.py` | **Layer mapping** (codeword→layer, 1–8 layers, dual-codeword for rank ≥5; `layer_groups` for 1, 2 or one codeword per layer) and SVD/codebook **precoding** | TS 38.211 §7.3.1.3 |
 | `ldpc.py` | **DL-SCH coding**: CRC (24A/24B/16), code-block segmentation, base-graph (BG1/BG2) selection, QC-LDPC encode, normalised min-sum decode, rate matching | TS 38.212 §5, §7.2 |
-| `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression, NR-LDPC BLER model, ideal per-codeword AMC | — |
+| `link_abstraction.py` | BICM capacity, MIESM effective-SINR compression (optionally weighted), NR-LDPC BLER model, ideal per-codeword AMC, SIC AMC with error propagation (`sic_amc`) | — |
 | `csi.py` | **CSI feedback**: rank (RI), precoder (PMI), CQI selection with BLER target and configurable feedback **delay** | TS 38.214 §5.2 |
 | `scheduler.py` | **Resource + MCS scheduling** with outer-loop link adaptation (OLLA) | TS 38.214 |
-| `receiver.py` | DM-RS channel estimation, **MMSE MIMO equalisation** (also with a channel estimate), per-RE post-equaliser SINR | — |
+| `receiver.py` | DM-RS channel estimation, **MMSE MIMO equalisation** (also with a channel estimate), per-RE post-equaliser SINR; alternative receivers: codeword-level **MMSE-SIC** (`cancelled_sinr`) and an **(R-)ML** abstraction (`rml_sinr_samples`) | — |
 | `link_simulator.py` | Per-slot chain integration, HARQ (chase combining), **spectral-efficiency** accounting | — |
 
 ### End-to-end per-slot chain
@@ -245,7 +245,7 @@ python tests/test_modules.py
 python tests/test_link_adaptation.py
 python tests/test_cdl_pdp.py
 python tests/test_antenna_orientation.py
-python -m pytest tests/test_cw2lm.py
+python -m pytest tests/test_cw2lm.py tests/test_receivers.py tests/test_multitrp.py
 ```
 
 `test_modules.py` validates constellation energy, noiseless modulation
@@ -302,13 +302,24 @@ value at 30, 100 and 300 ns. The recovered K-factors are 13.37 dB (CDL-D) and
 - `layer_groups` gives the TS 38.211 split
 - ideal AMC gains from one codeword per layer only when the layers are imbalanced
 
+`test_multitrp.py` checks that the multi-TRP channel stacks the TRPs' ports
+and applies each TRP's gain, timing, phase and frequency offset.
+
+`test_receivers.py` covers the alternative receivers:
+
+- cancelling layers reduces to MMSE (nothing cancelled) and to MRC (all others cancelled)
+- an imperfect channel estimate leaves a cancellation residual
+- the R-ML samples add up to log2 det(I + HᴴH/N0) for Gaussian inputs, and R-ML gives nothing over MMSE when the layers are orthogonal
+- SIC with one codeword equals MMSE, and error propagation is accounted for
+- weighted MIESM
+
 ---
 
-## Codeword-to-layer mapping vs Nokia R1-2607066 (no SIC)
+## Codeword-to-layer mapping studies (Nokia, Apple, 2-TRP CJT)
 
 `examples/cw2lm_nokia.py` repeats Nokia's link-level codeword-to-layer
-mapping evaluation (R1-2607066, Fig. 26 / 28, Tables 3 / 4) with the MMSE
-receiver only. It uses CDL-A, 64T (12,8,2,1,1;4,8), an 8-Rx handset, fixed
+mapping evaluation (R1-2607066, Fig. 26 / 28, Tables 3 / 4), first with the
+MMSE receiver only. It uses CDL-A, 64T (12,8,2,1,1;4,8), an 8-Rx handset, fixed
 ranks 1–4 and 1 / 2 / 1-per-layer codewords. It compares the results with
 Nokia's digitized curves: see **[docs/cw2lm-nokia.md](docs/cw2lm-nokia.md)**.
 
@@ -322,6 +333,25 @@ Nokia's digitized curves: see **[docs/cw2lm-nokia.md](docs/cw2lm-nokia.md)**.
 - **Diagnostic.** With Nokia's eigenmode spread imposed, the single-codeword
   curves follow Nokia's up to about 15 dB. Above that, MIESM gives less
   multi-codeword gain than Nokia reports.
+- **Receivers.** With SIC (`--receivers mmse,sic,rml`), per-layer codewords
+  gain only when the layers interfere. With a wideband precoder the gain is
+  +21 % at 10 dB, close to Nokia's MCW + SIC; with orthogonal SVD layers it
+  is 0. An R-ML receiver gives one codeword +17 %.
+
+`examples/cw2lm_apple.py` runs Apple R1-2608231's set-up: 32T, 4-Rx handset,
+wideband SVD, CSI every 20 ms with a 4 ms delay, and codeword-aware rank
+adaptation. It reproduces Apple's observations: large gains at fixed rank 4,
+2–6 % with rank adaptation, and losses at 30 km/h.
+**[docs/cw2lm-apple.md](docs/cw2lm-apple.md)** explains, step by step, why
+Apple and Nokia disagree. It uses this simulator and the system-level probe
+in NR_DL_SLS.
+
+`examples/cw2lm_mtrp.py` adds **2-TRP coherent joint transmission**. It uses
+`MultiTRPChannel`, a joint wideband SVD precoder with per-TRP power, and a
+second TRP at 0 / −6 / −10 dB. CJT raises SE by 20–70 % but balances the
+layers, so more codewords gain no more than with one TRP: +1 to +6 % with
+LMMSE, up to +14 % with SIC. See
+**[docs/cw2lm-mtrp.md](docs/cw2lm-mtrp.md)**.
 
 ---
 
