@@ -154,6 +154,72 @@ def plot(res: dict) -> None:
     fig.savefig(os.path.join(OUT, "cw2lm_nokia_rank4.png"), dpi=130)
     plt.close(fig)
     print("saved results/cw2lm_nokia.png, results/cw2lm_nokia_rank4.png")
+    if any("+" in n for n in V):
+        plot_receivers(res)
+
+
+def plot_receivers(res: dict) -> None:
+    """SIC and R-ML vs LMMSE: envelope gains and rank 4 against Nokia."""
+    cmp = res["comparison"]
+    V = res["variants"]
+    nsnr, ncur, n28 = nokia_curves()
+    s_grid = np.arange(-15, 40.5, 0.5)
+    dl = cmp["snr_offset_db_by_precoding"]
+
+    def env_gain(name, m, base_name):
+        d = dl.get(V[name].get("precoding", "svd_prb"), cmp["snr_offset_db"])
+        snr = np.array(res["snr_db"]) + d
+        e = np.interp(s_grid, snr, envelope(V[name]["se"], m))
+        e0 = np.interp(s_grid, snr, envelope(V[base_name]["se"], "1cw"))
+        return 100 * (e / e0 - 1)
+
+    fig, ax = plt.subplots(1, 3, figsize=(16, 5))
+    lines = [("1cw", "rml", "1 CW, R-ML", SLOT[0], "-"),
+             ("cw_per_layer", "mmse", "CW per layer, LMMSE", SLOT[1], ":"),
+             ("cw_per_layer", "sic", "CW per layer, SIC", SLOT[1], "-"),
+             ("cw_per_layer", "rml", "CW per layer, R-ML", SLOT[2], "-")]
+    for a, base, title in ((ax[0], "nokia_wb", "(a) Wideband SVD precoder: layers interfere"),
+                           (ax[1], "nokia", "(b) SVD per PRB: orthogonal layers")):
+        if base not in V:
+            continue
+        nmcw = 100 * (np.interp(s_grid, nsnr, envelope(ncur, "cw_per_layer"))
+                      / np.interp(s_grid, nsnr, envelope(ncur, "1cw")) - 1)
+        a.plot(s_grid, nmcw, color=REF, lw=2.2, label="Nokia, CW per layer (Fig. 26)")
+        a.plot(TABLE4_SNR, NOKIA_TABLE4["cw_per_layer_sic"], "D", color=REF, ms=8,
+               mfc=SURF, mew=1.6, label="Nokia, CW per layer + SIC (Table 4)")
+        for m, rx, label, col, ls in lines:
+            name = base if rx == "mmse" else f"{base}+{rx}"
+            if name in V:
+                a.plot(s_grid, env_gain(name, m, base), color=col, ls=ls, label=label)
+        a.axhline(0, color=INK2, lw=0.8)
+        a.set(xlim=(-15, 40), xlabel="SNR (dB, Nokia scale)",
+              ylabel="envelope gain over 1 CW, LMMSE (%)")
+        a.set_title(title, loc="left")
+        a.legend(fontsize=8, loc="upper right")
+    b = ax[2]
+    if "nokia_wb" in V:
+        d = dl.get("svd_wb", cmp["snr_offset_db"])
+        snr = np.array(res["snr_db"]) + d
+        ours = [("nokia_wb", "1cw", "1 CW, LMMSE", SLOT[0], "-"),
+                ("nokia_wb+rml", "1cw", "1 CW, R-ML", SLOT[0], "-."),
+                ("nokia_wb", "cw_per_layer", "4 CW, LMMSE", SLOT[1], "-"),
+                ("nokia_wb+sic", "cw_per_layer", "4 CW, SIC", SLOT[2], "-"),
+                ("nokia_wb+sic", "2cw", "2 CW, SIC", SLOT[3], "-")]
+        for name, m, label, col, ls in ours:
+            if name in V:
+                b.plot(snr, V[name]["se"][m]["4"], color=col, ls=ls, label=f"{label}, ours")
+        nok = [(ncur["1cw"]["4"], "1 CW", SLOT[0]), (ncur["cw_per_layer"]["4"], "4 CW", SLOT[1]),
+               (n28["4cw_sic"], "4 CW + SIC", SLOT[2]), (n28["2cw_sic"], "2 CW + SIC", SLOT[3])]
+        for y, label, col in nok:
+            b.plot(nsnr, y, color=col, ls="--", lw=1.3, label=f"{label}, Nokia")
+        b.set(xlim=(-15, 40), ylim=(0, 20.5), xlabel="SNR (dB, Nokia scale)",
+              ylabel="spectral efficiency (bit/s/Hz)")
+        b.set_title("(c) Rank 4, wideband SVD", loc="left")
+        b.legend(fontsize=7, loc="upper left", ncol=2)
+    fig.tight_layout()
+    fig.savefig(os.path.join(OUT, "cw2lm_nokia_receivers.png"), dpi=130)
+    plt.close(fig)
+    print("saved results/cw2lm_nokia_receivers.png")
 
 
 if __name__ == "__main__":
