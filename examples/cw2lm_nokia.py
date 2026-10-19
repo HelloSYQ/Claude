@@ -41,8 +41,9 @@ from nrdlsim import tbs as tbs_mod                                   # noqa: E40
 from nrdlsim.channel_models import (CDLChannel, build_panel,          # noqa: E402
                                     ut_handset_array, UT_HANDSET_ELEMENT)
 from nrdlsim.layer_mapping import layer_groups                       # noqa: E402
-from nrdlsim.link_abstraction import ideal_amc                        # noqa: E402
-from nrdlsim.receiver import batch_mmse_sinr_est                      # noqa: E402
+from nrdlsim.link_abstraction import ideal_amc, sic_amc               # noqa: E402
+from nrdlsim.receiver import (batch_mmse_sinr_est, cancelled_sinr,    # noqa: E402
+                              rml_sinr_samples)
 
 NOKIA_DATA = os.path.join(ROOT, "examples", "data", "nokia_r1_2607066_cw2lm.json")
 OUT = os.path.join(ROOT, "results")
@@ -85,6 +86,10 @@ VARIANTS = {
                    label="isotropic 8-Rx UE (2x2 dual-pol), non-ideal CE"),
     "ideal_ce": dict(ue="handset", ce_gain=None,
                      label="8-Rx directive handset, ideal CE"),
+    # wideband SVD precoder (one precoder for all 96 PRB): the layers are no
+    # longer orthogonal on each PRB, so SIC and ML have interference to remove
+    "nokia_wb": dict(ue="handset", ce_gain=CE_GAIN, precoding="svd_wb",
+                     label="Nokia set-up, wideband SVD precoder"),
     # diagnostic: the Nokia set-up with eigenmodes 2-4 attenuated so that the
     # 1 CW-per-layer curves of ranks 2-4 match Nokia's (fit_eigen_attenuation,
     # ideal CE as in the fit); its 1 CW and 2 CW curves are then predictions
@@ -117,30 +122,63 @@ def make_channel(seed: int, ue: str) -> CDLChannel:
     return CDLChannel(**kw)
 
 
-def drop_eigenmodes(seed: int, ue: str, eig_atten_db=None):
-    """SVD of one drop: left singular vectors U (n_rb, 8, 4) and s (n_rb, 4).
+def drop_eigenmodes(seed: int, ue: str, eig_atten_db=None, precoding: str = "svd_prb"):
+    """Precoded channel of one drop as U (n_rb, 8, 4) and s (n_rb, 4).
 
-    With the SVD precoder W = V_r / sqrt(r) the effective channel of rank r
-    is H W = U_r diag(s_r) / sqrt(r).
+    The effective channel of rank r is H W = U_r diag(s_r) / sqrt(r) with
+    W = V_r / sqrt(r).  'svd_prb': V = right singular vectors per PRB, so U
+    holds the left singular vectors and the layers are orthogonal.
+    'svd_wb': V = the dominant eigenvectors of sum_f H^H H (one wideband
+    precoder); U = H V normalised per column and s its column norms, and the
+    layers interfere on each PRB.
     """
     ch = make_channel(seed, ue)
     f = (np.arange(N_RB) - N_RB / 2 + 0.5) * 12 * SCS
     H = ch.frequency_response(f, 0.0)                     # (n_rb, 8, 64)
-    U, s, _ = np.linalg.svd(H, full_matrices=False)
-    s = s[:, :4]
+    if precoding == "svd_wb":
+        _, vec = np.linalg.eigh(np.einsum("fus,fut->st", np.conj(H), H))
+        G = H @ vec[:, ::-1][:, :4]                       # (n_rb, 8, 4)
+        s = np.linalg.norm(G, axis=1)
+        U = G / np.maximum(s[:, None, :], 1e-30)
+    else:
+        U, s, _ = np.linalg.svd(H, full_matrices=False)
+        U, s = U[:, :, :4], s[:, :4]
     if eig_atten_db is not None:
         s = s * 10.0 ** (-np.asarray(eig_atten_db) / 20.0)
-    return U[:, :, :4], s
+    return U, s
+
+
+def cw_bits(h, h_est, n0, groups, receiver):
+    """Expected bits and MCS per codeword of one drop / SNR / rank.
+
+    ``receiver``: 'mmse' (LMMSE), 'sic' (codeword-level MMSE-SIC in codeword
+    order, error propagation included) or 'rml' (ML abstraction,
+    nrdlsim.receiver.rml_sinr_samples).  One codeword with SIC is MMSE.
+    """
+    if receiver == "sic" and len(groups) > 1:
+        mcs, _, bits, _ = sic_amc(lambda c: cancelled_sinr(h, h_est, n0, c),
+                                  [list(g) for g in groups], N_RE, N_RB, MCS_TABLE)
+        return bits, mcs
+    if receiver == "rml":
+        smp, w = rml_sinr_samples(h, h_est, n0)          # (n_rb, r, n_s), (r, n_s)
+        res = [ideal_amc(smp[:, list(g)].ravel(), len(g), N_RE, N_RB, MCS_TABLE,
+                         weights=np.broadcast_to(w[list(g)], smp[:, list(g)].shape).ravel())
+               for g in groups]
+    else:
+        sinr = batch_mmse_sinr_est(h, h_est, n0)
+        res = [ideal_amc(sinr[:, list(g)].ravel(), len(g), N_RE, N_RB, MCS_TABLE)
+               for g in groups]
+    return sum(x[3] for x in res), [x[0] for x in res]
 
 
 def _worker(args):
-    seeds, ue, ce_gain, eig_atten_db = args
+    seeds, ue, ce_gain, eig_atten_db, receiver, precoding = args
     bits = {m: np.zeros((len(RANKS), len(SNRS))) for m in MAPPINGS}
     mcs4 = {m: np.zeros((len(SNRS), 4)) for m in MAPPINGS}     # rank-4 MCS per CW
     layer_sinr = np.zeros((len(seeds), len(SNRS), 4))           # rank-4, dB
     eig = np.zeros((len(seeds), 4))
     for d, seed in enumerate(seeds):
-        U, s = drop_eigenmodes(seed, ue, eig_atten_db)
+        U, s = drop_eigenmodes(seed, ue, eig_atten_db, precoding)
         eig[d] = 10 * np.log10((s ** 2).mean(0))
         rng = np.random.default_rng(1_000_003 + seed)
         for j, snr in enumerate(SNRS):
@@ -154,24 +192,25 @@ def _worker(args):
                 if r == 4:
                     layer_sinr[d, j] = 10 * np.log10(sinr.mean(0))
                 cache = {}
+                h_est = h if ce_gain is None else h + E[:, :, :r]
                 for m, max_cw in MAPPINGS.items():
                     groups = tuple(tuple(g) for g in layer_groups(r, max_cw))
                     if groups not in cache:
-                        res = [ideal_amc(sinr[:, list(g)].ravel(), len(g), N_RE, N_RB,
-                                         MCS_TABLE) for g in groups]
-                        cache[groups] = res
-                    res = cache[groups]
-                    bits[m][i, j] += sum(x[3] for x in res)
+                        cache[groups] = cw_bits(h, h_est, n0, groups, receiver)
+                    b, mcs = cache[groups]
+                    bits[m][i, j] += b
                     if r == 4:
-                        mcs4[m][j, :len(res)] += [x[0] for x in res]
+                        mcs4[m][j, :len(mcs)] += mcs
     return bits, mcs4, layer_sinr, eig
 
 
-def run_variant(name: str, n_drops: int, n_jobs: int, eig_atten_db=None) -> dict:
+def run_variant(name: str, n_drops: int, n_jobs: int, eig_atten_db=None,
+                receiver: str = "mmse") -> dict:
     v = VARIANTS[name]
     seeds = np.arange(n_drops)
     chunks = [seeds[k::n_jobs] for k in range(n_jobs)]
-    args = [(c, v["ue"], v["ce_gain"], eig_atten_db) for c in chunks if len(c)]
+    args = [(c, v["ue"], v["ce_gain"], eig_atten_db, receiver, v.get("precoding", "svd_prb"))
+            for c in chunks if len(c)]
     with ProcessPoolExecutor(max_workers=n_jobs) as ex:
         parts = list(ex.map(_worker, args))
     bits = {m: sum(p[0][m] for p in parts) for m in MAPPINGS}
@@ -181,7 +220,9 @@ def run_variant(name: str, n_drops: int, n_jobs: int, eig_atten_db=None) -> dict
     se = {m: {str(r): (bits[m][i] / n_drops / SLOT / BW).tolist()
               for i, r in enumerate(RANKS)} for m in MAPPINGS}
     imb = layer_sinr[:, :, 0] - layer_sinr[:, :, 3]
-    return {"label": v["label"], "se": se,
+    return {"label": v["label"] + ("" if receiver == "mmse" else f", {RX_LABEL[receiver]}"),
+            "receiver": receiver, "base": name, "precoding": v.get("precoding", "svd_prb"),
+            "se": se,
             "eig_atten_db": None if eig_atten_db is None else list(eig_atten_db),
             "rank4_mcs": {m: mcs4[m].tolist() for m in MAPPINGS},
             "rank4_layer_sinr_db_mean": layer_sinr.mean(0).tolist(),
@@ -264,8 +305,9 @@ def nokia_curves() -> tuple[np.ndarray, dict, dict]:
                  "3": f26["rank3_1cw"], "4": f26["rank4_1cw"]},
          "cw_per_layer": {"1": f26["rank1_1cw"], "2": f26["rank2_cw_per_layer"],
                           "3": f26["rank3_cw_per_layer"], "4": f26["rank4_cw_per_layer"]}}
-    r4_2cw = np.interp(snr, f28["snr_db"], f28["rank4_2cw"])
-    return snr, c, {"2cw": r4_2cw.tolist()}
+    r4 = {k: np.interp(snr, f28["snr_db"], f28[f"rank4_{k}"]).tolist()
+          for k in ("2cw", "2cw_sic", "4cw_sic")}
+    return snr, c, r4
 
 
 def snr_offset(ours_snr, ours_r1, nok_snr, nok_r1, se_max=4.5) -> float:
@@ -278,36 +320,57 @@ def snr_offset(ours_snr, ours_r1, nok_snr, nok_r1, se_max=4.5) -> float:
 
 
 TABLE4_SNR = (-5.0, 10.0, 20.0, 30.0)
-NOKIA_TABLE3 = {"1cw": [0, 19, 38], "cw_per_layer": [-7, 14, 17]}
-NOKIA_TABLE4 = {"cw_per_layer": [2.6, 14.0, 25.0, 20.0]}
+NOKIA_TABLE3 = {"1cw": [0, 19, 38], "cw_per_layer": [-7, 14, 17],
+                "cw_per_layer_sic": [-11, 9, 15]}
+NOKIA_TABLE4 = {"cw_per_layer": [2.6, 14.0, 25.0, 20.0],
+                "cw_per_layer_sic": [5.4, 25.7, 41.3, 30.0]}
+RX_LABEL = {"mmse": "LMMSE", "sic": "MMSE-SIC", "rml": "R-ML"}
 
 
 def compare(res: dict) -> dict:
     nsnr, ncur, n28 = nokia_curves()
     base = res["variants"]["nokia"]["se"]
     delta = snr_offset(SNRS, base["1cw"]["1"], nsnr, ncur["1cw"]["1"])
-    out = {"snr_offset_db": delta, "nokia_digitized": {
+    # a wideband precoder has less rank-1 gain: align it on its own rank 1
+    deltas = {"svd_prb": delta}
+    if "nokia_wb" in res["variants"]:
+        deltas["svd_wb"] = snr_offset(SNRS, res["variants"]["nokia_wb"]["se"]["1cw"]["1"],
+                                      nsnr, ncur["1cw"]["1"])
+    out = {"snr_offset_db": delta, "snr_offset_db_by_precoding": deltas, "nokia_digitized": {
         "table3": {m: transitions(ncur, m, nsnr) for m in ("1cw", "cw_per_layer")},
         "table4_pct": [100 * (np.interp(s, nsnr, envelope(ncur, "cw_per_layer"))
                               / np.interp(s, nsnr, envelope(ncur, "1cw")) - 1)
                        for s in TABLE4_SNR]}}
     for name, v in res["variants"].items():
         cur = v["se"]
-        s_al = SNRS + delta
+        dv = deltas.get(v.get("precoding", "svd_prb"), delta)
+        s_al = SNRS + dv
         e1 = envelope(cur, "1cw")
-        row = {"table3": {m: [None if x is None else x + delta for x in transitions(cur, m, SNRS)]
+        base = res["variants"].get(v.get("base", name), v)["se"]
+        e1_mmse = envelope(base, "1cw")
+        row = {"snr_offset_db": dv,
+               "table3": {m: [None if x is None else x + dv for x in transitions(cur, m, SNRS)]
                           for m in MAPPINGS},
                "table4_pct": {m: [100 * (np.interp(s, s_al, envelope(cur, m))
                                          / np.interp(s, s_al, e1) - 1) for s in TABLE4_SNR]
                               for m in ("2cw", "cw_per_layer")},
                "rank4_gain_pct": {m: [100 * (np.interp(s, s_al, cur[m]["4"])
                                              / np.interp(s, s_al, cur["1cw"]["4"]) - 1)
-                                      for s in TABLE4_SNR] for m in ("2cw", "cw_per_layer")}}
+                                      for s in TABLE4_SNR] for m in ("2cw", "cw_per_layer")},
+               "table4_vs_mmse_1cw_pct": {
+                   m: [100 * (np.interp(s, s_al, envelope(cur, m))
+                              / np.interp(s, s_al, e1_mmse) - 1) for s in TABLE4_SNR]
+                   for m in MAPPINGS},
+               "rank4_vs_mmse_1cw_pct": {
+                   m: [100 * (np.interp(s, s_al, cur[m]["4"])
+                              / np.interp(s, s_al, base["1cw"]["4"]) - 1) for s in TABLE4_SNR]
+                   for m in MAPPINGS}}
         out[name] = row
-    n4 = {"1cw": ncur["1cw"]["4"], "2cw": n28["2cw"], "cw_per_layer": ncur["cw_per_layer"]["4"]}
+    n4 = {"1cw": ncur["1cw"]["4"], "2cw": n28["2cw"], "cw_per_layer": ncur["cw_per_layer"]["4"],
+          "2cw_sic": n28["2cw_sic"], "cw_per_layer_sic": n28["4cw_sic"]}
     out["nokia_digitized"]["rank4_gain_pct"] = {
         m: [100 * (np.interp(s, nsnr, n4[m]) / np.interp(s, nsnr, n4["1cw"]) - 1)
-            for s in TABLE4_SNR] for m in ("2cw", "cw_per_layer")}
+            for s in TABLE4_SNR] for m in ("2cw", "cw_per_layer", "2cw_sic", "cw_per_layer_sic")}
     return out
 
 
@@ -325,11 +388,23 @@ def print_summary(res: dict, cmp: dict) -> None:
     for name in res["variants"]:
         for m in ("2cw", "cw_per_layer"):
             print(f"  {name:12s} {m:12s} {f(cmp[name]['table4_pct'][m])}")
+    print("\nWith the alternative receivers: envelope SE gain over 1 CW with LMMSE (%) at",
+          TABLE4_SNR)
+    print(f"  Nokia table  cw_per_layer+SIC {f(NOKIA_TABLE4['cw_per_layer_sic'])}")
+    for name, v in res["variants"].items():
+        if v.get("receiver", "mmse") == "mmse":
+            continue
+        for m in MAPPINGS:
+            print(f"  {name:14s} {m:12s} {f(cmp[name]['table4_vs_mmse_1cw_pct'][m])}")
+        print(f"  {name:14s} Table 3, CW per layer: {f(cmp[name]['table3']['cw_per_layer'])}"
+              f"   (Nokia MCW+SIC {f(NOKIA_TABLE3['cw_per_layer_sic'])})")
     print("\nRank 4 (Fig. 28), SE gain over 1 CW (%) at", TABLE4_SNR)
     for m in ("2cw", "cw_per_layer"):
         print(f"  Nokia digit. {m:12s} {f(cmp['nokia_digitized']['rank4_gain_pct'][m])}")
+        print(f"  Nokia digit. {m + '+SIC':12s} "
+              f"{f(cmp['nokia_digitized']['rank4_gain_pct'][m + '_sic'])}")
         for name in res["variants"]:
-            print(f"  {name:12s} {m:12s} {f(cmp[name]['rank4_gain_pct'][m])}")
+            print(f"  {name:12s} {m:12s} {f(cmp[name]['rank4_vs_mmse_1cw_pct'][m])}")
     for name, v in res["variants"].items():
         p = v["eig_spread_db_pct"]
         print(f"\n{name}: eigenvalue spread s1^2/s4^2 (dB) p10/p50/p90 = "
@@ -341,7 +416,12 @@ def main() -> int:
     ap.add_argument("--drops", type=int, default=300)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     ap.add_argument("--variants", default=",".join(VARIANTS))
+    ap.add_argument("--receivers", default="mmse,sic,rml",
+                    help="receivers; LMMSE runs every variant, the others --rx-variants")
+    ap.add_argument("--rx-variants", default="nokia,nokia_wb,matched")
     ap.add_argument("--no-plot", action="store_true")
+    ap.add_argument("--out", default=os.path.join(OUT, "cw2lm_nokia.json"),
+                    help="results JSON (figures are only written for the default)")
     args = ap.parse_args()
 
     t0 = time.time()
@@ -352,6 +432,7 @@ def main() -> int:
         t1 = time.time()
         res["variants"][name] = run_variant(name, args.drops, args.jobs)
         print(f"{name}: {time.time() - t1:.0f} s")
+    atten = None
     if "matched" in names:
         nsnr, ncur, _ = nokia_curves()
         delta = snr_offset(SNRS, res["variants"]["nokia"]["se"]["1cw"]["1"],
@@ -361,13 +442,21 @@ def main() -> int:
         t1 = time.time()
         res["variants"]["matched"] = run_variant("matched", args.drops, args.jobs, atten)
         print(f"matched: {time.time() - t1:.0f} s")
+    for rx in [x for x in args.receivers.split(",") if x != "mmse"]:
+        for name in args.rx_variants.split(","):
+            if name not in res["variants"]:
+                continue
+            t1 = time.time()
+            res["variants"][f"{name}+{rx}"] = run_variant(
+                name, args.drops, args.jobs, atten if name == "matched" else None, rx)
+            print(f"{name}+{rx}: {time.time() - t1:.0f} s")
     res["comparison"] = cmp = compare(res)
     res["runtime_s"] = round(time.time() - t0, 1)
     print_summary(res, cmp)
-    os.makedirs(OUT, exist_ok=True)
-    with open(os.path.join(OUT, "cw2lm_nokia.json"), "w") as fh:
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+    with open(args.out, "w") as fh:
         json.dump(res, fh, indent=1)
-    if not args.no_plot:
+    if not args.no_plot and os.path.abspath(args.out) == os.path.join(OUT, "cw2lm_nokia.json"):
         from cw2lm_nokia_plot import plot   # noqa: E402  (examples/ on sys.path)
         plot(res)
     return 0

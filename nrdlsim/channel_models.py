@@ -789,3 +789,46 @@ class CDLChannel:
         phase = np.exp(-1j * 2 * np.pi
                        * freqs_hz[:, None] * self.delays_s[None, :])  # (f, c)
         return np.einsum('fc,cus->fus', phase, Hc)
+
+
+class MultiTRPChannel:
+    """Channel from several TRPs to one UE (multi-TRP, e.g. coherent JT).
+
+    The per-TRP channels (any objects with ``frequency_response(f, t)``
+    returning [F, n_rx, n_tx_k]) are stacked along the transmit-port axis,
+    TRP 0 first:
+
+        H(f, t) = [ a_0 H_0(f, t), a_1 H_1(f, t), ... ],
+        a_k = 10^(gains_db[k] / 20) exp(-j 2 pi f tau_k) exp(j (phi_k + 2 pi df_k t))
+
+    ``gains_db``: received power of each TRP relative to its own channel's
+    normalisation (path-loss / shadowing difference, e.g. [0, -6]).
+    ``delays_ns``: arrival-time offset at the UE (the UE's timing follows
+    TRP 0).  ``phase_deg`` / ``freq_offset_hz``: static phase offset and
+    residual carrier-frequency offset between the TRPs' oscillators.
+    ``port_slices[k]`` gives TRP k's transmit ports in the stacked channel.
+    """
+
+    def __init__(self, links, gains_db=None, delays_ns=None, phase_deg=None,
+                 freq_offset_hz=None):
+        self.links = list(links)
+        k = len(self.links)
+        z = lambda v: np.zeros(k) if v is None else np.asarray(v, float)  # noqa: E731
+        self.gains_db, self.delays_ns = z(gains_db), z(delays_ns)
+        self.phase_deg, self.freq_offset_hz = z(phase_deg), z(freq_offset_hz)
+        self.n_rx = self.links[0].n_rx
+        sizes = [ln.n_tx for ln in self.links]
+        edges = np.concatenate([[0], np.cumsum(sizes)])
+        self.port_slices = [slice(int(a), int(b)) for a, b in zip(edges[:-1], edges[1:])]
+        self.n_tx = int(edges[-1])
+
+    def frequency_response(self, freqs_hz: np.ndarray, t: float) -> np.ndarray:
+        """Stacked MIMO frequency response H[freq, rx, sum_k n_tx_k] at time ``t``."""
+        freqs_hz = np.asarray(freqs_hz, float)
+        blocks = []
+        for k, ln in enumerate(self.links):
+            a = 10 ** (self.gains_db[k] / 20) * np.exp(
+                1j * (np.deg2rad(self.phase_deg[k]) + 2 * np.pi * self.freq_offset_hz[k] * t)
+                - 1j * 2 * np.pi * freqs_hz * self.delays_ns[k] * 1e-9)
+            blocks.append(ln.frequency_response(freqs_hz, t) * a[:, None, None])
+        return np.concatenate(blocks, axis=-1)
