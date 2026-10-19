@@ -1,6 +1,6 @@
-# Codeword-to-layer mapping: Nokia R1-2607066 without SIC
+# Codeword-to-layer mapping: Nokia R1-2607066
 
-This study takes the link-level codeword-to-layer mapping (CW2LM) evaluation of Nokia R1-2607066 (RAN1 #126bis, section "Mechanism for layer mapping addressing layer imbalance") and repeats it in nrdlsim with Nokia's assumptions. It covers the 1 codeword per layer case (up to 4 codewords for 4 layers) and leaves out the SIC receiver.
+This study takes the link-level codeword-to-layer mapping (CW2LM) evaluation of Nokia R1-2607066 (RAN1 #126bis, section "Mechanism for layer mapping addressing layer imbalance") and repeats it in nrdlsim with Nokia's assumptions. It covers the 1 codeword per layer case (up to 4 codewords for 4 layers). The main comparison leaves out the SIC receiver; [Alternative receivers](#alternative-receivers-mmse-sic-and-r-ml) adds MMSE-SIC and R-ML.
 
 Nokia's results without SIC that it compares against are:
 
@@ -23,7 +23,7 @@ Files:
 
 - `examples/cw2lm_nokia.py`: the study and the comparison metrics.
 - `examples/data/nokia_r1_2607066_cw2lm.json`: Nokia's Fig. 26 and Fig. 28 curves, digitized.
-- `results/cw2lm_nokia.json`, `.png`, `_rank4.png`: the last run.
+- `results/cw2lm_nokia.json`, `.png`, `_rank4.png`, `_receivers.png`: the last run.
 
 ## Set-up
 
@@ -35,7 +35,7 @@ The comparison uses Nokia's Table 11 (Annex B) assumptions. Items the contributi
 | Channel | CDL-A, DS 100 ns, 3 km/h | CDL-A, DS 100 ns; one slot per drop with ideal CSI, so the speed plays no role |
 | gNB | 64 TXRU, 192 AE, (12,8,2,1,1;4,8), (d<sub>H</sub>,d<sub>V</sub>) = (0.5, 0.7) λ, polarization model 1 | 64 ports. Each TXRU drives 3 vertical elements at 0.7 λ with *assumed* electrical tilt 90°, so port rows are 2.1 λ apart. TR 38.901 element: 8 dBi, 65°, 30 dB. ±45° (polarization model 2, which is the same as model 1 at boresight) |
 | UE | 8 Rx, TR 38.901 §7.3 (V19.1.0) directive antennas, (α,β,γ) = (0,0,0), no blockage | 8 single-polarized directive elements on the edges of a 15 × 7 cm handset, upright and facing azimuth 0, no blockage. Element 5.4 dBi, HPBW 125°, 22.5 dB. Element positions and pattern are *assumed* (see below) |
-| Receiver | MMSE, SIC | LMMSE, no SIC |
+| Receiver | MMSE, SIC | LMMSE; MMSE-SIC and R-ML in [Alternative receivers](#alternative-receivers-mmse-sic-and-r-ml) |
 | Channel estimation | non-ideal | DM-RS estimate of the precoded channel with error variance N0/6 per entry (*assumed*); the MMSE filter uses the estimate |
 | Precoding | SU-MIMO | SVD per PRB (ideal CSI), equal power per layer (*assumed*) |
 | Link adaptation | AMC | ideal AMC per codeword: the MCS with the most expected bits, TBS·(1−BLER), from MIESM and the LDPC waterfall |
@@ -113,7 +113,7 @@ Neither changes the picture. At 20 dB and above, the gain is zero in every varia
 | Here, isotropic 8-Rx UE | −3.9 | −14.1 | −18.3 |
 | Nokia, inferred from the Fig. 26 MCW curves | **−17** | **−33** | **−40** |
 
-With SVD precoding the rank-r layers do not interfere, and layer k has SINR σk²·SNR/r. So the 1-CW-per-layer curves determine the eigenvalue spread directly. Nokia's rank-2 curve lies below rank 1 up to −7 dB and gains only 1.1 bit/s/Hz over rank 1 at 0 dB. This means their second layer is about 17 dB weaker than the first. Their rank-4 curve is still rising at 40 dB, which puts the fourth layer about 40 dB down.
+With SVD precoding the rank-r layers do not interfere, and layer k has SINR σk²·SNR/r. So the 1-CW-per-layer curves determine the eigenvalue spread directly, if Nokia's precoder is per-PRB SVD. (The SIC section below shows it probably is not; part of the spread inferred here is then inter-layer interference.) Nokia's rank-2 curve lies below rank 1 up to −7 dB and gains only 1.1 bit/s/Hz over rank 1 at 0 dB. This means their second layer is about 17 dB weaker than the first. Their rank-4 curve is still rising at 40 dB, which puts the fourth layer about 40 dB down.
 
 In the CDL-A channel here, the sectored gNB element keeps mainly the dominant cluster group: clusters 2–4, at AOD −4°. Most other clusters leave at 80–180° from boresight and are attenuated by 20–30 dB. The ±45° gNB polarizations then give a second eigenmode within about 4 dB of the first. Making the UE co-polarized or isotropic, changing the TXRU tilt, or removing the sub-array changes σ2² by at most 2.5 dB. A single-polarized gNB moves it to −9 dB. No variant tried gets near −17 dB.
 
@@ -149,6 +149,40 @@ MIESM credits a codeword with the mean mutual information of its layers. That is
 
 This explanation is not verified here. The bit-true LDPC path in nrdlsim uses a toy code: a random base graph without rate matching. It cannot test 256QAM codewords at rate 0.9. Checking the point needs an NR LDPC (TS 38.212 base graphs and rate matching), or an MIESM calibration factor for mixed-SINR codewords.
 
+## Alternative receivers: MMSE-SIC and R-ML
+
+The study also runs with the two alternative receivers (`--receivers mmse,sic,rml`, see `nrdlsim.receiver`):
+
+- **Codeword-level MMSE-SIC.** Codewords are decoded in codeword order, and a codeword is cancelled only after its CRC passes. The cancellation uses the channel estimate, so its error stays as residual interference. Each codeword's MCS assumes the earlier codewords are cancelled, and the expected bits include error propagation.
+- **(R-)ML abstraction.** Each layer takes the MMSE-SIC chain-rule term of every detection order, averaged over all orders. The layers then add up to the joint mutual information log2 det(I + HᴴH/N0), with each layer capped by its constellation.
+
+These are compared against Nokia's SIC results in Table 3, Table 4 and Fig. 28. The variant `nokia_wb` uses one wideband SVD precoder for all 96 PRB instead of SVD per PRB. Its SNR axis is aligned on its own rank-1 curve, −4.35 dB.
+
+![Receivers](../results/cw2lm_nokia_receivers.png)
+
+Envelope gain over 1 CW with LMMSE at −5 / 10 / 20 / 30 dB:
+
+| | 1 CW, R-ML | CW per layer, LMMSE | CW per layer, SIC | CW per layer, R-ML |
+|---|---|---|---|---|
+| SVD per PRB (`nokia`) | 0 / 0 / 0 / 0 % | +2 / +6 / 0 / 0 % | +1 / +6 / 0 / 0 % | +1 / +6 / 0 / 0 % |
+| wideband SVD (`nokia_wb`) | +1 / +17 / +5 / 0 % | +1 / +6 / +1 / 0 % | +2 / +21 / +8 / 0 % | +3 / +20 / +5 / 0 % |
+| Nokia (Table 4) | – | +2.6 / +14 / +25 / +20 % | +5.4 / +25.7 / +41.3 / +30 % | – |
+
+At rank 4, the gain over 1 CW with LMMSE at −5 / 10 / 20 / 30 dB:
+- wideband SVD: 4 CW + SIC +30 / +22 / +8 / 0 %, and 1 CW + R-ML +19 / +18 / +5 / 0 %;
+- Nokia: 4 CW + SIC +220 / +113 / +75 / +53 %.
+
+**With SVD per PRB, SIC and R-ML give exactly the LMMSE result.** The layers are orthogonal, so there is nothing to cancel. The same holds for the `matched` diagnostic, whose results are identical for all three receivers.
+
+**Nokia's SIC gain therefore says something about their link.** Their MCW + SIC gain is about twice their MCW gain (25.7 % against 14 % at 10 dB). That needs layers that interfere, so their precoder is not ideal per-PRB SVD; it is probably wideband or codebook-based, possibly with CSI or estimation impairments. The large per-layer SINR spread behind Nokia's MMSE curves is then partly inter-layer interference that MMSE cannot remove, not only eigenvalue spread. The `matched` diagnostic, which assumes orthogonal layers, puts all of it into the eigenvalues.
+
+**With interfering layers, the receivers matter more than the codeword mapping.**
+- With the wideband precoder, SIC raises the multi-codeword gain at 10 dB from 6 % to 21 %, close to Nokia's 25.7 %.
+- R-ML gives a single codeword 17 % without any extra codeword, which is most of what MCW + SIC gains.
+- Above about 20 dB, all layers reach the top MCS and every gain vanishes, as before.
+
+Nokia's MCW + SIC system-level result (Fig. 29) should be read in this light: it compares SIC against MMSE as well as 4 CW against 1 CW. See [cw2lm-apple.md](cw2lm-apple.md) for the same receivers under Apple's realistic-CSI assumptions.
+
 ## Answer: do we observe similar results?
 
 **Qualitatively, yes.** All of Nokia's directions are reproduced:
@@ -162,10 +196,11 @@ This explanation is not verified here. The bit-true LDPC path in nrdlsim uses a 
 
 **With Nokia's layer imbalance imposed**, the low- and mid-SNR results are reproduced. Our MIESM model still shows less multi-codeword gain at high SNR and for 2 CW than Nokia's.
 
-So, without SIC, the size of the multi-codeword gain depends on the layer imbalance more than on anything else in the link. This agrees with Nokia's own point (Observation 36, Proposals 43–44): the UE antenna, blockage and channel assumptions must produce realistic imbalance, and companies should report the rank and per-layer SINR distributions. For the same reason, a system-level comparison is only meaningful once the UE antenna model is verified against TR 38.901 V19.1.0.
+So, without SIC, the size of the multi-codeword gain depends on the layer imbalance more than on anything else in the link. With SIC, it also depends on how much the layers interfere: SIC gains nothing with orthogonal layers. An R-ML receiver recovers most of the same gain for a single codeword. This agrees with Nokia's own point (Observation 36, Proposals 43–44): the UE antenna, blockage and channel assumptions must produce realistic imbalance, and companies should report the rank and per-layer SINR distributions. For the same reason, a system-level comparison is only meaningful once the UE antenna model is verified against TR 38.901 V19.1.0.
 
 ## Limitations
 
 - **Nokia data.** Digitized from figures, ±0.15 bit/s/Hz. The SNR axes are aligned on rank 1.
 - **Assumed models.** The handset UE geometry and element, TXRU tilt, CE error model, SVD precoding and overhead are assumptions where the contribution is silent.
 - **Single slot per drop.** Ideal CSI, no CSI ageing or OLLA, ideal AMC, MIESM abstraction. The fixed-rank curves are therefore upper bounds on what each mapping achieves.
+- **Receivers.** The R-ML receiver is an ideal-ML abstraction, not a bit-level reduced-complexity detector. SIC cancels ideally apart from the channel-estimation error.
