@@ -221,6 +221,32 @@ SE = delivered_information_bits / (num_slots · slot_duration) / (num_rb · 12 �
 4. A HARQ retransmission keeps the transport block's rank, MCS and TBS, and is
    chase-combined with the earlier attempts.
 
+## Studies (`examples/`)
+
+Each script runs one study and writes its figure (and, for most, a JSON file)
+to `results/`. Longer write-ups are in `docs/`.
+
+| Topic | Script(s) | Output / write-up |
+|---|---|---|
+| SE of channel models and MIMO orders | `compare_configs.py` | `results/compare_se.png` |
+| Calibration against 5G-IA and TS 38.104 | `calibration_5gia.py` | [docs/calibration.md](docs/calibration.md) |
+| CP-OFDM waveform: CFO and timing offset | `waveform_demo.py` | `results/waveform_impairments.png` |
+| CDL geometry illustration; PDP check against TR 38.901 | `plot_cdl_geometry.py`, `verify_cdl_pdp.py` | `results/cdl_antenna_geometry.png`, `results/cdl_pdp_verification.png` |
+| Singular-value distributions (32T8R, delay spread, upper 6 GHz array scaling) | `sv_distribution.py`, `sv_array_scaling.py` | `results/sv_*.png` |
+| OLLA convergence | `olla_convergence.py` | `results/olla_convergence.png` |
+| Codeword-to-layer mapping: 1/2/4 codewords, 4 and 8 layers, handheld UE, 1024QAM, OLLA, rank adaptation | `codeword_mapping_*.py` | `results/codeword_mapping_*.png` |
+| Codeword-to-layer mapping vs Nokia R1-2607066, Apple R1-2608231, 2-TRP coherent JT | `cw2lm_nokia.py`, `cw2lm_apple.py`, `cw2lm_mtrp.py` | [docs/cw2lm-nokia.md](docs/cw2lm-nokia.md), [docs/cw2lm-apple.md](docs/cw2lm-apple.md), [docs/cw2lm-mtrp.md](docs/cw2lm-mtrp.md) |
+| 4T4R / 32T4R / 128T4R SE, CDL-C and AWGN, 256QAM and 1024QAM tables | `array_size_se.py` (`--mcs-table 4`) | `results/array_size_se*.png` |
+| When does rank 4 beat rank 3? (32T4R, CDL-A, 30 ns) | `rank3_vs_rank4.py` | `results/rank3_vs_rank4_cdla.png` |
+| Frequency-domain (VRB-to-PRB) interleaving | `fd_interleaving.py` | [docs/fd-interleaving.md](docs/fd-interleaving.md) |
+| One TB over 400 MHz vs two TBs over 200 MHz (FR2, code-block-aware BLER) | `tb_split_400mhz.py` | `results/tb_split_400mhz.png` |
+
+The code-block-aware TB error model used by the last two studies
+(TS 38.212 segmentation and rate-matching split, frequency-first RE mapping,
+TB BLER = 1 − Π(1 − BLER_cb)) lives in `nrdlsim/ldpc.py`,
+`nrdlsim/re_mapping.py` and `nrdlsim/link_abstraction.py`. The main
+simulator (`NRDownlinkSimulator`) still uses the single-waveform TB model.
+
 ## Calibration against 3GPP / 5G-IA
 
 `examples/calibration_5gia.py` cross-checks the simulator (SNR at 70 %
@@ -241,17 +267,17 @@ SNR = total Es/N0).
 ## Tests
 
 ```bash
-python tests/test_modules.py
-python tests/test_link_adaptation.py
-python tests/test_cdl_pdp.py
-python tests/test_antenna_orientation.py
-python -m pytest tests/test_cw2lm.py tests/test_receivers.py tests/test_multitrp.py
-python -m pytest tests/test_fd_interleaving.py
+pip install pytest
+python -m pytest tests/          # all test files (~2 min)
+python tests/validate_ber.py     # uncoded QAM BER vs closed-form AWGN theory
 ```
 
+The older test files also run on their own (`python tests/test_modules.py`).
+
 `test_modules.py` validates constellation energy, noiseless modulation
-round-trip, MCS/TBS, TDL fading power normalisation, monotone BICM capacity,
-and genuine LDPC coding gain.
+round-trip, MCS/TBS, TDL fading power normalisation, the AWGN MIMO channel,
+monotone BICM capacity, the code-block-aware TB error model, and genuine LDPC
+coding gain.
 
 `test_link_adaptation.py` holds regression tests for the link-adaptation path.
 They check that:
@@ -269,9 +295,10 @@ They check that:
 `test_cdl_pdp.py` checks that the CDL generator reproduces the TR 38.901 power
 delay profile. It checks that:
 
-- the tables' delays, powers and LOS power equal the TR 38.901 values shipped
-  with NVIDIA Sionna. This check is skipped unless Sionna's data files are
-  present (`pip install --no-deps sionna`).
+- every column of the CDL tables (delays, powers, angles, per-cluster
+  spreads, XPR and the LOS ray) equals the TR 38.901 values shipped with
+  NVIDIA Sionna. This check is skipped unless Sionna's data files are present
+  (`pip install --no-deps sionna`).
 - each table is normalised to unit RMS delay spread, and the CDL-D/E K-factors
   are 13.3 / 22.0 dB
 - every cluster's power, recovered from the generated H(f) by least squares on

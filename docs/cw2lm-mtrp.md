@@ -2,6 +2,8 @@
 
 Does multi-TRP coherent joint transmission (CJT) make more codewords worthwhile? The argument for it is that the layers of a joint precoder can come from TRPs of different strength. They would then be imbalanced, which is the condition under which one codeword per layer gains over NR's single codeword.
 
+> **Note (Oct 2026).** The CDL-C results here were computed before six CDL-C clusters' angles were corrected to TR 38.901 (CDL-A was already correct). Re-running the single-TRP CDL-C 3 km/h case of the Apple study with the corrected tables and the same seeds (8 drops) changes SE by at most 2.5 % at any point and the mean Alt 3 vs Alt 1 gain by at most 0.2 percentage points, so the conclusions here should stand too. Re-run the script to refresh the numbers.
+
 This study tests that argument in a deliberately simple 2-TRP case, using the link-level machinery of the Apple and Nokia studies ([cw2lm-apple.md](cw2lm-apple.md), [cw2lm-nokia.md](cw2lm-nokia.md)).
 
 ```bash

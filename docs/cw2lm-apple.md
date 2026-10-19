@@ -8,6 +8,8 @@ Two RAN1 #126bis contributions disagree on multi-codeword PDSCH for ranks 1–4.
 | Link level | one CW per layer beats one CW by 14–25 % at 10–30 dB (Table 4); with SIC by 26–41 % | at fixed rank 4 large gains, but with codeword-aware rank adaptation within a few %; 0 at 30 km/h |
 | System level | 4 CW + SIC: +12 / +21 / +28 % mean user throughput at three loads (Fig. 29) | Alt 2 −4 to −12 %, Alt 3 −8 to −18 % user SE at 30 % and 50 % resource utilisation (Table 2) |
 
+> **Note (Oct 2026).** The CDL-C results here were computed before six CDL-C clusters' angles were corrected to TR 38.901 (CDL-A was already correct). Re-running the CDL-C 3 km/h case with the corrected tables and the same seeds (8 drops) changes SE by at most 2.5 % at any point and the mean Alt 3 vs Alt 1 gain by at most 0.2 percentage points, so the conclusions stand. Re-run the script to refresh the numbers.
+
 This note puts the two evaluations side by side and checks each difference with the simulators in this repository (nrdlsim) and in NR_DL_SLS. The results are in `results/cw2lm_apple.json` (link level, Apple's set-up) and in NR_DL_SLS `results/cw2lm_sls_probe.json` (system level). The comparison with Nokia's own set-up is in [cw2lm-nokia.md](cw2lm-nokia.md).
 
 ```bash
