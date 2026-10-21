@@ -236,8 +236,7 @@ to `results/`. Longer write-ups are in `docs/`.
 | CP-OFDM waveform: CFO and timing offset | `waveform_demo.py` | `results/waveform_impairments.png` |
 | CDL geometry illustration; PDP check against TR 38.901 | `plot_cdl_geometry.py`, `verify_cdl_pdp.py` | `results/cdl_antenna_geometry.png`, `results/cdl_pdp_verification.png` |
 | Singular-value distributions (32T8R, delay spread, upper 6 GHz array scaling) | `sv_distribution.py`, `sv_array_scaling.py` | `results/sv_*.png` |
-| OLLA convergence | `olla_convergence.py` | `results/olla_convergence.png` |
-| Codeword-to-layer mapping: 1/2/4 codewords, 4 and 8 layers, handheld UE, 1024QAM, OLLA, rank adaptation | `codeword_mapping_*.py` | `results/codeword_mapping_*.png` |
+| Codeword-to-layer mapping: 1/2/4 codewords, 4 and 8 layers, handheld UE, 1024QAM, rank adaptation, OLLA and its convergence | `codeword_mapping.py <study>`, one subcommand per study (`--help` lists them) | `results/codeword_mapping_*.png`, `results/olla_convergence.png` |
 | Codeword-to-layer mapping vs Nokia R1-2607066, Apple R1-2608231, 2-TRP coherent JT | `cw2lm_nokia.py`, `cw2lm_apple.py`, `cw2lm_mtrp.py` | [docs/cw2lm-nokia.md](docs/cw2lm-nokia.md), [docs/cw2lm-apple.md](docs/cw2lm-apple.md), [docs/cw2lm-mtrp.md](docs/cw2lm-mtrp.md) |
 | 4T4R / 32T4R / 128T4R SE, CDL-C and AWGN, 256QAM and 1024QAM tables | `array_size_se.py` (`--mcs-table 4`) | `results/array_size_se*.png` |
 | When does rank 4 beat rank 3? (32T4R, CDL-A, 30 ns) | `rank3_vs_rank4.py` | `results/rank3_vs_rank4_cdla.png` |
