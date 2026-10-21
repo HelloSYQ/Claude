@@ -36,29 +36,6 @@ class CSIReport:
     precoders: dict = field(default_factory=dict)
 
 
-def _mmse_layer_sinr(H_eff: np.ndarray, noise_var: float) -> np.ndarray:
-    """Post-MMSE per-layer SINR for effective channel H_eff = H @ W.
-
-    H_eff: [n_rx, n_layers].  Returns SINR per layer (linear).
-    """
-    n_rx, n_layers = H_eff.shape
-    A = H_eff.conj().T @ H_eff + noise_var * np.eye(n_layers)
-    Ainv = np.linalg.inv(A)
-    # MMSE receiver: G = (H^H H + N0 I)^-1 H^H
-    G = Ainv @ H_eff.conj().T
-    sinr = np.zeros(n_layers)
-    for k in range(n_layers):
-        gk = G[k]
-        sig = np.abs(gk @ H_eff[:, k]) ** 2
-        interf = 0.0
-        for j in range(n_layers):
-            if j != k:
-                interf += np.abs(gk @ H_eff[:, j]) ** 2
-        noise = noise_var * np.abs(gk @ gk.conj())
-        sinr[k] = sig / (interf + noise + 1e-12)
-    return sinr
-
-
 # CSI reference resource used when the caller does not supply one:
 # 13 PDSCH symbols minus 12 DM-RS RE per PRB (TS 38.214 5.2.2.5).
 DEFAULT_REF_RE_PER_RB = 144

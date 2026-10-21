@@ -173,13 +173,6 @@ def build_code(bg: int, z: int, seed: int = 0) -> LDPCCode:
     return LDPCCode(bg, z, kb, mb, base_sys)
 
 
-def _circ_shift(vec: np.ndarray, s: int) -> np.ndarray:
-    """Circular (right) shift of a length-Z block, the QC-LDPC permutation."""
-    if s < 0:
-        return np.zeros_like(vec)
-    return np.roll(vec, s)
-
-
 def encode(code: LDPCCode, info_bits: np.ndarray) -> np.ndarray:
     """Systematic accumulator encoding: returns [systematic | parity] bits."""
     z, kb, mb = code.z, code.kb, code.mb

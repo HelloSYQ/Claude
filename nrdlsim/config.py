@@ -61,17 +61,9 @@ class DMRSConfig:
     """PDSCH DM-RS configuration (TS 38.211 7.4.1.1)."""
 
     config_type: int = 1           # type 1 (6 RE/RB/symbol) or type 2 (4 RE)
-    num_front_load_symbols: int = 1
+    num_front_load_symbols: int = 1  # resource_grid models 1 (single-symbol) only
     additional_positions: int = 1  # number of additional DM-RS symbols
     num_cdm_groups_without_data: int = 2
-
-    def re_per_rb_per_dmrs_symbol(self) -> int:
-        # Type 1: 6 subcarriers used for DM-RS per CDM group column set.
-        return 6 if self.config_type == 1 else 4
-
-    def dmrs_symbols(self, n_pdsch_symbols: int) -> int:
-        """Number of OFDM symbols carrying DM-RS in the allocation."""
-        return self.num_front_load_symbols + self.additional_positions
 
 
 @dataclass

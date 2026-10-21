@@ -26,7 +26,7 @@ self-contained file under `nrdlsim/`:
 | `config.py` | Carrier / PDSCH / antenna / channel / HARQ configuration, numerology (SCS = 15·2^μ kHz), slot timing, bandwidth | TS 38.211 §4 |
 | `mcs_tables.py` | **MCS scheduling** tables 1/2/3 and CQI tables 1/2; CQI→MCS mapping | TS 38.214 §5.1.3.1, §5.2.2.1 |
 | `tbs.py` | Transport block size (≤3824-bit quantisation table + >3824 formula) | TS 38.214 §5.1.3.2 |
-| `resource_grid.py` | **Resource grid** + **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
+| `resource_grid.py` | **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
 | `modulation.py` | QPSK/16/64/256-QAM Gray mapping and max-log **soft (LLR) demapping** | TS 38.211 §5.1 |
 | `ofdm.py` | **Time-domain CP-OFDM waveform** (IFFT + cyclic prefix / FFT), RF impairments (**CFO, timing offset**), multipath, EVM measurement | TS 38.211 §5.3 |
 | `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, TXRU sub-arrays with electrical tilt, per-element UE arrays such as an edge-mounted **handset**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
@@ -67,9 +67,12 @@ simulator offers two paths, selected by `fec_mode`:
   block length) decides block success. This produces smooth spectral-efficiency
   curves quickly.
 
-* **`ldpc`** — a **bit-true** QC-LDPC path: real CRC, encoding, QAM, per-RE
-  channel + noise, MMSE equalisation, LLR demapping and min-sum decoding of a
-  representative code block. Slower; intended for validation on small
+* **`ldpc`** — a **bit-true** QC-LDPC check: one fixed-size code block
+  (BG2 dimensions, Z = 32, 320 information bits, rate about 1/5) is encoded,
+  modulated with the scheduled MCS's QAM, sent over AWGN at the allocation's
+  mean post-MMSE SINR, LLR-demapped and min-sum decoded. It does not apply the
+  MCS code rate or the per-RE SINR spread, so it checks the coding chain
+  rather than predicting the MCS's BLER. Slower; intended for small
   configurations. The self-tests confirm the decoder achieves real coding gain
   (100 % decode at +6 dB, 0 % at −6 dB on QPSK).
 
@@ -475,7 +478,7 @@ sample-level path for studying synchronisation and CP-overrun.
 * Channel estimation, PMI selection and CQI use ideal-CSI SVD beamforming as a
   practical proxy for the Type-I codebook; DM-RS estimation error is modelled.
 * The `miesm` link abstraction is the standard methodology for producing SE
-  curves; the `ldpc` mode provides a bit-true reference. Neither embeds the full
+  curves; the `ldpc` mode is a bit-true check of the coding chain. Neither embeds the full
   38.212 base-graph shift tables — the LDPC code uses the NR base-graph
   *architecture* (systematic part + dual-diagonal accumulator core, lifted by
   circular shifts) rather than the exact tabulated coefficients.

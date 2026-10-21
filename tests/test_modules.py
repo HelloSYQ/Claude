@@ -8,7 +8,7 @@ from nrdlsim.modulation import Modulator, _build_constellation
 from nrdlsim import mcs_tables, tbs as tbs_mod
 from nrdlsim import ldpc as ldpc_mod
 from nrdlsim.channel_models import TDLChannel
-from nrdlsim.link_abstraction import bicm_capacity, required_snr_db
+from nrdlsim.link_abstraction import bicm_capacity
 
 
 def test_constellation_unit_energy():
