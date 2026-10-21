@@ -92,13 +92,20 @@ A second notebook,
 explains the modules and results of the codeword-to-layer mapping comparison
 with Nokia R1-2607066 (regenerate with `python notebooks/build_cw2lm_nokia.py`).
 
-They render with outputs directly on GitHub. To re-execute the guide locally:
+The notebooks are stored without outputs: their plots made them several MB and
+every re-run rewrote them. GitHub shows their text and code. To see the plots,
+run them in Jupyter, or render executed copies to HTML (`notebooks/*.html` is
+git-ignored):
 
 ```bash
-jupyter nbconvert --to notebook --execute --inplace \
-    notebooks/NR_Downlink_Simulator_Guide.ipynb
-# or regenerate from source: python notebooks/build_guide.py
+jupyter nbconvert --to html --execute notebooks/NR_Downlink_Simulator_Guide.ipynb
+jupyter nbconvert --to html --execute notebooks/CW2LM_Nokia_Comparison.ipynb
+# regenerate them from source: python notebooks/build_guide.py
+#                               python notebooks/build_cw2lm_nokia.py
 ```
+
+Clear the outputs before committing a notebook
+(`jupyter nbconvert --clear-output --inplace notebooks/*.ipynb`).
 
 ## Installation
 
