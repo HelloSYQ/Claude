@@ -8,8 +8,6 @@ Two RAN1 #126bis contributions disagree on multi-codeword PDSCH for ranks 1–4.
 | Link level | one CW per layer beats one CW by 14–25 % at 10–30 dB (Table 4); with SIC by 26–41 % | at fixed rank 4 large gains, but with codeword-aware rank adaptation within a few %; 0 at 30 km/h |
 | System level | 4 CW + SIC: +12 / +21 / +28 % mean user throughput at three loads (Fig. 29) | Alt 2 −4 to −12 %, Alt 3 −8 to −18 % user SE at 30 % and 50 % resource utilisation (Table 2) |
 
-> **Note (Oct 2026).** The CDL-C results here were computed before six CDL-C clusters' angles were corrected to TR 38.901 (CDL-A was already correct). Re-running the CDL-C 3 km/h case with the corrected tables and the same seeds (8 drops) changes SE by at most 2.5 % at any point and the mean Alt 3 vs Alt 1 gain by at most 0.2 percentage points, so the conclusions stand. Re-run the script to refresh the numbers.
-
 This note puts the two evaluations side by side and checks each difference with the simulators in this repository (nrdlsim) and in NR_DL_SLS. The results are in `results/cw2lm_apple.json` (link level, Apple's set-up) and in NR_DL_SLS `results/cw2lm_sls_probe.json` (system level). The comparison with Nokia's own set-up is in [cw2lm-nokia.md](cw2lm-nokia.md).
 
 ```bash
@@ -75,9 +73,9 @@ Gain of Alt 3 (one CW per layer) over Alt 1 (one CW) at −2 / 6 / 14 / 22 / 30 
 
 | CDL-C | −2 dB | 6 dB | 14 dB | 22 dB | 30 dB |
 |---|---|---|---|---|---|
-| 3 km/h, CSI 20 ms / 4 ms, fixed rank 4 (Apple Fig. 2-2b) | +18 % | +2 % | 0 % | +1 % | 0 % |
-| 3 km/h, CSI 20 ms / 4 ms, CW-aware RI (Apple Fig. 2-4a) | +2 % | 0 % | +2 % | 0 % | 0 % |
-| 30 km/h, CSI 20 ms / 4 ms, CW-aware RI (Apple Fig. 2-4b) | −8 % | −10 % | −9 % | −8 % | −5 % |
+| 3 km/h, CSI 20 ms / 4 ms, fixed rank 4 (Apple Fig. 2-2b) | +17 % | +3 % | 0 % | +1 % | −1 % |
+| 3 km/h, CSI 20 ms / 4 ms, CW-aware RI (Apple Fig. 2-4a) | +1 % | 0 % | +2 % | 0 % | −1 % |
+| 30 km/h, CSI 20 ms / 4 ms, CW-aware RI (Apple Fig. 2-4b) | −8 % | −10 % | −10 % | −8 % | −4 % |
 
 ![Apple set-up](../results/cw2lm_apple.png)
 
@@ -88,7 +86,7 @@ These numbers reproduce Apple's observations 2-11a and 2-11b:
 
 Apple's Fig. 2-3 (CDL-A, rank adaptation) shows 6–7 % at 10–18 dB; this simulator gives 6 % at 14 dB.
 
-**At 30 km/h, one codeword per layer loses 5–10 %.** OLLA holds the first-transmission BLER at 10–11 % for every mapping, so the loss is not extra block errors. It is the larger MCS back-off each per-layer codeword needs. A 4-layer codeword averages the SINR fluctuation of its layers, while a per-layer codeword sees each layer's fluctuation in full, so its OLLA settles lower. Apple's curves at 30 km/h coincide with each other at about 7.5 bit/s/Hz. In this simulator, the LMMSE with a fresh DM-RS estimate keeps the aged layers separable at high SNR, so the curves do not saturate. The direction is the same, however: more codewords do not help once CSI ages.
+**At 30 km/h, one codeword per layer loses 4–10 %.** OLLA holds the first-transmission BLER between 10 and 11.5 % for every mapping, so the loss is not extra block errors. It is the larger MCS back-off each per-layer codeword needs. A 4-layer codeword averages the SINR fluctuation of its layers, while a per-layer codeword sees each layer's fluctuation in full, so its OLLA settles lower. Apple's curves at 30 km/h coincide with each other at about 7.5 bit/s/Hz. In this simulator, the LMMSE with a fresh DM-RS estimate keeps the aged layers separable at high SNR, so the curves do not saturate. The direction is the same, however: more codewords do not help once CSI ages.
 
 **Fixed rank 4 is what makes the large numbers.** On Apple's channel, Nokia's metric (envelope of fixed-rank averages) gives 2–9 %, close to Apple's 2–6 % with rank adaptation. A single codeword at fixed rank 4 must carry layers that rank adaptation would drop. Per-report rank adaptation takes a further 1–3 points off the envelope.
 
@@ -139,16 +137,16 @@ nrdlsim now has two alternatives to the LMMSE receiver (`nrdlsim.receiver`):
 | CDL-A 3 km/h, LMMSE | 0 | +1 / +2 / +3 / +5 / +3 % | +1 / +2 / +5 / +7 / +4 % |
 | CDL-A 3 km/h, SIC | 0 | +1 / +2 / +5 / +9 / +9 % | +1 / +2 / +8 / +14 / +12 % |
 | CDL-A 3 km/h, R-ML | 0 / 0 / +3 / +7 / +8 % | +1 / +3 / +8 / +14 / +13 % | +1 / +3 / +10 / +15 / +12 % |
-| CDL-C 30 km/h, LMMSE | 0 | −7 / −6 / −3 / −3 / −2 % | −7 / −9 / −8 / −8 / −4 % |
-| CDL-C 30 km/h, SIC | 0 | −2 / +3 / +7 / +9 / +15 % | −6 / +4 / +9 / +17 / +28 % |
-| CDL-C 30 km/h, R-ML | +9 / +29 / +36 / +41 / +34 % | +3 / +21 / +33 / +37 / +33 % | +2 / +15 / +26 / +32 / +30 % |
+| CDL-C 30 km/h, LMMSE | 0 | −7 / −6 / −3 / −4 / −1 % | −7 / −9 / −9 / −8 / −3 % |
+| CDL-C 30 km/h, SIC | +1 / −1 / 0 / 0 / +1 % | −4 / +3 / +6 / +9 / +16 % | −6 / +3 / +8 / +17 / +29 % |
+| CDL-C 30 km/h, R-ML | +9 / +28 / +37 / +41 / +35 % | +5 / +22 / +33 / +37 / +34 % | +3 / +14 / +25 / +32 / +31 % |
 
 (16 drops × 400 slots; `results/cw2lm_apple_rx.json`.)
 
 - **SIC and ML help only when the layers interfere.** With SVD precoding per PRB and ideal CSI the layers are orthogonal, and both receivers give exactly the LMMSE result. Nokia's MCW + SIC gain is 25.7 % against 14 % without SIC at 10 dB. That can only happen if Nokia's layers interfere, so Nokia's precoder is not per-PRB SVD. Part of the "layer imbalance" behind Nokia's MMSE curves is then inter-layer interference, which an MMSE receiver turns into per-layer SINR loss and which SIC removes.
 - **With interfering layers, SIC roughly triples the multi-codeword gain**: wideband SVD gives +21 % at 10 dB against +6 % with LMMSE. That is close to Nokia's +25.7 %.
 - **R-ML gives a single codeword most of that gain (+17 %), without a second codeword.** This is the old LTE result: SCW with ML detection performs close to MCW with SIC.
-- **Ageing makes the layers interfere.** At 30 km/h the aged wideband precoder leaks between layers. One codeword per layer then loses 4–9 % with LMMSE but gains up to 28 % with SIC. A single codeword with R-ML gains 29–41 %, more than any multi-codeword option, because it keeps one OLLA loop over averaged layers.
+- **Ageing makes the layers interfere.** At 30 km/h the aged wideband precoder leaks between layers. One codeword per layer then loses 3–9 % with LMMSE but gains up to 29 % with SIC. A single codeword with R-ML gains 28–41 % from 6 dB, more than any multi-codeword option, because it keeps one OLLA loop over averaged layers.
 
 ## 5. Why the results differ
 
@@ -170,7 +168,7 @@ Both evaluations are internally consistent, and both are reproduced here in thei
 4. **CSI and interference realism.**
    - Nokia's SLS assumes ideal precoding and ideal channel and interference estimation.
    - Apple's uses eType-II with a 20 ms period and 4 ms delay, realistic estimation, and 20 % of the UEs at 30 km/h on 7 GHz.
-   - A per-layer MCS can only exploit the imbalance it can predict. In the system probe the per-layer prediction error is 3.5–4 dB (std), about the same as the imbalance between the layers. At 30 km/h with LMMSE, one codeword per layer loses 5–10 % at link level, because each per-layer codeword's OLLA has to back off from that error by itself.
+   - A per-layer MCS can only exploit the imbalance it can predict. In the system probe the per-layer prediction error is 3.5–4 dB (std), about the same as the imbalance between the layers. At 30 km/h with LMMSE, one codeword per layer loses 4–10 % at link level, because each per-layer codeword's OLLA has to back off from that error by itself.
 5. **Per-codeword overheads and traffic.** Apple's 20 MHz carrier, FTP 1 traffic and per-codeword OLLA loops, CRCs and TB segmentation favour one codeword. Nokia's 100 MHz carrier with FTP 3 at high load favours more codewords, and Nokia's gain grows with load. Apple's 7 GHz, 256T array puts many layers at the top MCS, where no mapping can gain.
 
 **Conclusion.** Nokia shows what more codewords can gain when rank adaptation leaves imbalanced, interfering layers and SIC is available, under ideal CSI. Apple shows that with codeword-aware rank adaptation, realistic CSI and interference, and LMMSE, little imbalance is left that a per-layer MCS can track.

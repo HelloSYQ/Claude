@@ -351,11 +351,11 @@ and applies each TRP's gain, timing, phase and frequency offset.
 
 ---
 
-## Codeword-to-layer mapping vs Nokia R1-2607066 (no SIC)
+## Codeword-to-layer mapping studies (Nokia, Apple, 2-TRP CJT)
 
 `examples/cw2lm_nokia.py` repeats Nokia's link-level codeword-to-layer
-mapping evaluation (R1-2607066, Fig. 26 / 28, Tables 3 / 4) with the MMSE
-receiver only. It uses CDL-A, 64T (12,8,2,1,1;4,8), an 8-Rx handset, fixed
+mapping evaluation (R1-2607066, Fig. 26 / 28, Tables 3 / 4), first with the
+MMSE receiver only. It uses CDL-A, 64T (12,8,2,1,1;4,8), an 8-Rx handset, fixed
 ranks 1–4 and 1 / 2 / 1-per-layer codewords. It compares the results with
 Nokia's digitized curves: see **[docs/cw2lm-nokia.md](docs/cw2lm-nokia.md)**.
 

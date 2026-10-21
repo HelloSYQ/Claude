@@ -184,61 +184,6 @@ def ideal_amc(sinr_lin, n_layers: int, n_re_per_rb: int, n_prb: int,
     return i, int(tbs[i]), float(bler[i]), float(bits[i])
 
 
-def mcs_bler(sinr_lin, n_layers: int, mcs: int, n_re_per_rb: int, n_prb: int,
-             mcs_table: int = 2, weights=None) -> float:
-    """BLER of a codeword at a given MCS on the SINRs ``sinr_lin``."""
-    qm_of, tbs, thr, slope = _amc_table(mcs_table, n_layers, n_re_per_rb, n_prb)
-    e = effective_sinr_miesm(sinr_lin, int(qm_of[mcs]), weights)
-    return float(1.0 / (1.0 + np.exp(slope[mcs] * (e - thr[mcs]))))
-
-
-def sic_amc(sinr_after, groups, n_re_per_rb: int, n_prb: int,
-            mcs_table: int = 2):
-    """Ideal AMC and expected bits for codeword-level MMSE-SIC.
-
-    ``groups`` are the layers of each codeword in decoding order and
-    ``sinr_after(cancelled)`` returns the per-layer SINRs [n, n_layers] with
-    the layers ``cancelled`` (a tuple) removed, e.g. via
-    :func:`nrdlsim.receiver.cancelled_sinr`.  Codeword k's MCS is chosen
-    (most expected bits) assuming codewords 1..k-1 were decoded and
-    cancelled.  At decoding, only codewords whose CRC passed are cancelled,
-    so a failure propagates: the expected bits sum over all success
-    patterns of the earlier codewords.  Returns (mcs list, tbs list,
-    expected bits, P(success) per codeword).
-    """
-    cache = {}
-
-    def sinr(cancel):
-        key = tuple(sorted(cancel))
-        if key not in cache:
-            cache[key] = sinr_after(key)
-        return cache[key]
-
-    mcs, tbs = [], []
-    done = []
-    for g in groups:
-        i, tb, _, _ = ideal_amc(sinr(done)[:, g].ravel(), len(g), n_re_per_rb,
-                                n_prb, mcs_table)
-        mcs.append(i)
-        tbs.append(tb)
-        done = done + list(g)
-
-    p_ok = np.zeros(len(groups))
-
-    def walk(k, cancelled, prob):
-        if k == len(groups) or prob == 0.0:
-            return
-        g = groups[k]
-        bl = mcs_bler(sinr(cancelled)[:, g].ravel(), len(g), mcs[k], n_re_per_rb,
-                      n_prb, mcs_table)
-        p_ok[k] += prob * (1.0 - bl)
-        walk(k + 1, cancelled + list(g), prob * (1.0 - bl))
-        walk(k + 1, cancelled, prob * bl)
-
-    walk(0, [], 1.0)
-    return mcs, tbs, float(np.dot(tbs, p_ok)), p_ok
-
-
 # ---------------------------------------------------------------------------
 # Code-block-aware TB error model (TS 38.212 clause 5.2.2 segmentation)
 # ---------------------------------------------------------------------------
@@ -313,3 +258,58 @@ def cb_re_weights(n_rb: int, n_cb: int, n_re_per_rb: int) -> np.ndarray:
     e_r = rate_match_lengths(n_re_per_rb * n_rb, n_cb, 1, 1)
     return code_block_prb_fraction(code_block_spans(e_r, 1, 1),
                                    vrb_to_prb_non_interleaved(n_rb))
+
+
+def mcs_bler(sinr_lin, n_layers: int, mcs: int, n_re_per_rb: int, n_prb: int,
+             mcs_table: int = 2, weights=None) -> float:
+    """BLER of a codeword at a given MCS on the SINRs ``sinr_lin``."""
+    qm_of, tbs, thr, slope = _amc_table(mcs_table, n_layers, n_re_per_rb, n_prb)
+    e = effective_sinr_miesm(sinr_lin, int(qm_of[mcs]), weights)
+    return float(1.0 / (1.0 + np.exp(slope[mcs] * (e - thr[mcs]))))
+
+
+def sic_amc(sinr_after, groups, n_re_per_rb: int, n_prb: int,
+            mcs_table: int = 2):
+    """Ideal AMC and expected bits for codeword-level MMSE-SIC.
+
+    ``groups`` are the layers of each codeword in decoding order and
+    ``sinr_after(cancelled)`` returns the per-layer SINRs [n, n_layers] with
+    the layers ``cancelled`` (a tuple) removed, e.g. via
+    :func:`nrdlsim.receiver.cancelled_sinr`.  Codeword k's MCS is chosen
+    (most expected bits) assuming codewords 1..k-1 were decoded and
+    cancelled.  At decoding, only codewords whose CRC passed are cancelled,
+    so a failure propagates: the expected bits sum over all success
+    patterns of the earlier codewords.  Returns (mcs list, tbs list,
+    expected bits, P(success) per codeword).
+    """
+    cache = {}
+
+    def sinr(cancel):
+        key = tuple(sorted(cancel))
+        if key not in cache:
+            cache[key] = sinr_after(key)
+        return cache[key]
+
+    mcs, tbs = [], []
+    done = []
+    for g in groups:
+        i, tb, _, _ = ideal_amc(sinr(done)[:, g].ravel(), len(g), n_re_per_rb,
+                                n_prb, mcs_table)
+        mcs.append(i)
+        tbs.append(tb)
+        done = done + list(g)
+
+    p_ok = np.zeros(len(groups))
+
+    def walk(k, cancelled, prob):
+        if k == len(groups) or prob == 0.0:
+            return
+        g = groups[k]
+        bl = mcs_bler(sinr(cancelled)[:, g].ravel(), len(g), mcs[k], n_re_per_rb,
+                      n_prb, mcs_table)
+        p_ok[k] += prob * (1.0 - bl)
+        walk(k + 1, cancelled + list(g), prob * (1.0 - bl))
+        walk(k + 1, cancelled, prob * bl)
+
+    walk(0, [], 1.0)
+    return mcs, tbs, float(np.dot(tbs, p_ok)), p_ok

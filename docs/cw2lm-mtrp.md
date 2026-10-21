@@ -2,8 +2,6 @@
 
 Does multi-TRP coherent joint transmission (CJT) make more codewords worthwhile? The argument for it is that the layers of a joint precoder can come from TRPs of different strength. They would then be imbalanced, which is the condition under which one codeword per layer gains over NR's single codeword.
 
-> **Note (Oct 2026).** The CDL-C results here were computed before six CDL-C clusters' angles were corrected to TR 38.901 (CDL-A was already correct). Re-running the single-TRP CDL-C 3 km/h case of the Apple study with the corrected tables and the same seeds (8 drops) changes SE by at most 2.5 % at any point and the mean Alt 3 vs Alt 1 gain by at most 0.2 percentage points, so the conclusions here should stand too. Re-run the script to refresh the numbers.
-
 This study tests that argument in a deliberately simple 2-TRP case, using the link-level machinery of the Apple and Nokia studies ([cw2lm-apple.md](cw2lm-apple.md), [cw2lm-nokia.md](cw2lm-nokia.md)).
 
 ```bash
@@ -49,10 +47,10 @@ Gain of Alt 3 over Alt 1 at −2 / 6 / 14 / 22 / 30 dB, CSI 20 ms / 4 ms, codewo
 
 | CDL-C | Alt 1 SE (bit/s/Hz) | Alt 3 vs Alt 1 | Alt 1 CJT vs sTRP |
 |---|---|---|---|
-| sTRP | 3.2 / 6.2 / 10.0 / 14.5 / 18.3 | 0 / −1 / 0 / −1 / −1 % | – |
-| CJT, TRP 2 at 0 dB | 4.7 / 8.7 / 13.3 / 17.3 / 20.7 | −1 / −1 / +1 / −2 / 0 % | +50 / +40 / +32 / +19 / +13 % |
-| CJT, TRP 2 at −6 dB | 3.8 / 7.2 / 11.6 / 15.9 / 19.5 | −1 / −1 / −1 / −1 / −1 % | +19 / +17 / +15 / +10 / +7 % |
-| CJT, TRP 2 at −10 dB | 3.4 / 6.7 / 11.0 / 15.4 / 19.0 | +1 / −1 / 0 / −1 / −1 % | +7 / +9 / +9 / +6 / +4 % |
+| sTRP | 3.1 / 6.2 / 10.1 / 14.5 / 18.3 | +1 / 0 / +1 / −1 / −1 % | – |
+| CJT, TRP 2 at 0 dB | 4.8 / 8.6 / 13.3 / 17.3 / 20.7 | −1 / −1 / 0 / −2 / 0 % | +51 / +40 / +32 / +19 / +13 % |
+| CJT, TRP 2 at −6 dB | 3.8 / 7.3 / 11.6 / 15.8 / 19.6 | −1 / −1 / −1 / −1 / −1 % | +20 / +18 / +16 / +9 / +7 % |
+| CJT, TRP 2 at −10 dB | 3.4 / 6.7 / 11.0 / 15.4 / 19.1 | +1 / −1 / −1 / −1 / 0 % | +9 / +9 / +9 / +6 / +4 % |
 
 At fixed rank 4 (CDL-A), Alt 3 gains +46 / +17 / +10 / +10 / +4 % for one TRP but only +3 / +2 / +3 / +1 / 0 % for CJT at 0 dB.
 
