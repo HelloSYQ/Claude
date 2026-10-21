@@ -1,28 +1,12 @@
-"""Resource grid construction and DM-RS resource-element accounting.
+"""PDSCH DM-RS and data resource-element accounting.
 
 Follows the PDSCH resource mapping in TS 38.211 clause 7.3.1.6 and the
-DM-RS structure in clause 7.4.1.1.  The grid is the standard NR
-[subcarrier x OFDM symbol x antenna port] container.
+DM-RS structure in clause 7.4.1.1.
 """
 
 from __future__ import annotations
 
-import numpy as np
-
-from .config import CarrierConfig, PDSCHConfig, DMRSConfig
-
-
-class ResourceGrid:
-    """A single-slot NR resource grid for one antenna layer/port."""
-
-    def __init__(self, carrier: CarrierConfig):
-        self.carrier = carrier
-        self.n_sc = carrier.n_subcarriers
-        self.n_sym = carrier.symbols_per_slot
-        self.grid = np.zeros((self.n_sc, self.n_sym), dtype=complex)
-
-    def reset(self):
-        self.grid[:] = 0.0
+from .config import PDSCHConfig
 
 
 def dmrs_symbol_positions(pdsch: PDSCHConfig) -> list[int]:

@@ -1,5 +1,5 @@
-"""Generate notebooks/CW2LM_Nokia_Comparison.ipynb (run, then execute with
-``jupyter nbconvert --to notebook --execute --inplace``)."""
+"""Generate notebooks/CW2LM_Nokia_Comparison.ipynb, without outputs (run it
+in Jupyter, or render with ``jupyter nbconvert --to html --execute``)."""
 import os
 
 import nbformat as nbf

@@ -26,7 +26,7 @@ self-contained file under `nrdlsim/`:
 | `config.py` | Carrier / PDSCH / antenna / channel / HARQ configuration, numerology (SCS = 15·2^μ kHz), slot timing, bandwidth | TS 38.211 §4 |
 | `mcs_tables.py` | **MCS scheduling** tables 1/2/3 and CQI tables 1/2; CQI→MCS mapping | TS 38.214 §5.1.3.1, §5.2.2.1 |
 | `tbs.py` | Transport block size (≤3824-bit quantisation table + >3824 formula) | TS 38.214 §5.1.3.2 |
-| `resource_grid.py` | **Resource grid** + **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
+| `resource_grid.py` | **DM-RS** RE accounting, data-RE / overhead computation | TS 38.211 §7.3.1.6, §7.4.1.1 |
 | `modulation.py` | QPSK/16/64/256-QAM Gray mapping and max-log **soft (LLR) demapping** | TS 38.211 §5.1 |
 | `ofdm.py` | **Time-domain CP-OFDM waveform** (IFFT + cyclic prefix / FFT), RF impairments (**CFO, timing offset**), multipath, EVM measurement | TS 38.211 §5.3 |
 | `channel_models.py` | **NR channel generation**: TDL-A…E (Kronecker-correlated MIMO) and CDL-A…E (per-cluster AoD/AoA/ZoD/ZoA, intra-cluster rays, **dual-polarized UPA panels** with cross-pol XPR coupling, **directional element gain pattern**, TXRU sub-arrays with electrical tilt, per-element UE arrays such as an edge-mounted **handset**, Ricean LOS for CDL-D/E); configurable delay spread & Doppler | TR 38.901 §7.3, §7.5, §7.7 |
@@ -67,9 +67,12 @@ simulator offers two paths, selected by `fec_mode`:
   block length) decides block success. This produces smooth spectral-efficiency
   curves quickly.
 
-* **`ldpc`** — a **bit-true** QC-LDPC path: real CRC, encoding, QAM, per-RE
-  channel + noise, MMSE equalisation, LLR demapping and min-sum decoding of a
-  representative code block. Slower; intended for validation on small
+* **`ldpc`** — a **bit-true** QC-LDPC check: one fixed-size code block
+  (BG2 dimensions, Z = 32, 320 information bits, rate about 1/5) is encoded,
+  modulated with the scheduled MCS's QAM, sent over AWGN at the allocation's
+  mean post-MMSE SINR, LLR-demapped and min-sum decoded. It does not apply the
+  MCS code rate or the per-RE SINR spread, so it checks the coding chain
+  rather than predicting the MCS's BLER. Slower; intended for small
   configurations. The self-tests confirm the decoder achieves real coding gain
   (100 % decode at +6 dB, 0 % at −6 dB on QPSK).
 
@@ -89,13 +92,20 @@ A second notebook,
 explains the modules and results of the codeword-to-layer mapping comparison
 with Nokia R1-2607066 (regenerate with `python notebooks/build_cw2lm_nokia.py`).
 
-They render with outputs directly on GitHub. To re-execute the guide locally:
+The notebooks are stored without outputs: their plots made them several MB and
+every re-run rewrote them. GitHub shows their text and code. To see the plots,
+run them in Jupyter, or render executed copies to HTML (`notebooks/*.html` is
+git-ignored):
 
 ```bash
-jupyter nbconvert --to notebook --execute --inplace \
-    notebooks/NR_Downlink_Simulator_Guide.ipynb
-# or regenerate from source: python notebooks/build_guide.py
+jupyter nbconvert --to html --execute notebooks/NR_Downlink_Simulator_Guide.ipynb
+jupyter nbconvert --to html --execute notebooks/CW2LM_Nokia_Comparison.ipynb
+# regenerate them from source: python notebooks/build_guide.py
+#                               python notebooks/build_cw2lm_nokia.py
 ```
+
+Clear the outputs before committing a notebook
+(`jupyter nbconvert --clear-output --inplace notebooks/*.ipynb`).
 
 ## Installation
 
@@ -221,6 +231,31 @@ SE = delivered_information_bits / (num_slots · slot_duration) / (num_rb · 12 �
 4. A HARQ retransmission keeps the transport block's rank, MCS and TBS, and is
    chase-combined with the earlier attempts.
 
+## Studies (`examples/`)
+
+Each script runs one study and writes its figure (and, for most, a JSON file)
+to `results/`. Longer write-ups are in `docs/`.
+
+| Topic | Script(s) | Output / write-up |
+|---|---|---|
+| SE of channel models and MIMO orders | `compare_configs.py` | `results/compare_se.png` |
+| Calibration against 5G-IA and TS 38.104 | `calibration_5gia.py` | [docs/calibration.md](docs/calibration.md) |
+| CP-OFDM waveform: CFO and timing offset | `waveform_demo.py` | `results/waveform_impairments.png` |
+| CDL geometry illustration; PDP check against TR 38.901 | `plot_cdl_geometry.py`, `verify_cdl_pdp.py` | `results/cdl_antenna_geometry.png`, `results/cdl_pdp_verification.png` |
+| Singular-value distributions (32T8R, delay spread, upper 6 GHz array scaling) | `sv_distribution.py`, `sv_array_scaling.py` | `results/sv_*.png` |
+| Codeword-to-layer mapping: 1/2/4 codewords, 4 and 8 layers, handheld UE, 1024QAM, rank adaptation, OLLA and its convergence | `codeword_mapping.py <study>`, one subcommand per study (`--help` lists them) | `results/codeword_mapping_*.png`, `results/olla_convergence.png` |
+| Codeword-to-layer mapping vs Nokia R1-2607066, Apple R1-2608231, 2-TRP coherent JT | `cw2lm_nokia.py`, `cw2lm_apple.py`, `cw2lm_mtrp.py` | [docs/cw2lm-nokia.md](docs/cw2lm-nokia.md), [docs/cw2lm-apple.md](docs/cw2lm-apple.md), [docs/cw2lm-mtrp.md](docs/cw2lm-mtrp.md) |
+| 4T4R / 32T4R / 128T4R SE, CDL-C and AWGN, 256QAM and 1024QAM tables | `array_size_se.py` (`--mcs-table 4`) | `results/array_size_se*.png` |
+| When does rank 4 beat rank 3? (32T4R, CDL-A, 30 ns) | `rank3_vs_rank4.py` | `results/rank3_vs_rank4_cdla.png` |
+| Frequency-domain (VRB-to-PRB) interleaving | `fd_interleaving.py` | [docs/fd-interleaving.md](docs/fd-interleaving.md) |
+| One TB over 400 MHz vs two TBs over 200 MHz (FR2, code-block-aware BLER) | `tb_split_400mhz.py` | `results/tb_split_400mhz.png` |
+
+The code-block-aware TB error model used by the last two studies
+(TS 38.212 segmentation and rate-matching split, frequency-first RE mapping,
+TB BLER = 1 − Π(1 − BLER_cb)) lives in `nrdlsim/ldpc.py`,
+`nrdlsim/re_mapping.py` and `nrdlsim/link_abstraction.py`. The main
+simulator (`NRDownlinkSimulator`) still uses the single-waveform TB model.
+
 ## Calibration against 3GPP / 5G-IA
 
 `examples/calibration_5gia.py` cross-checks the simulator (SNR at 70 %
@@ -241,16 +276,17 @@ SNR = total Es/N0).
 ## Tests
 
 ```bash
-python tests/test_modules.py
-python tests/test_link_adaptation.py
-python tests/test_cdl_pdp.py
-python tests/test_antenna_orientation.py
-python -m pytest tests/test_cw2lm.py tests/test_receivers.py tests/test_multitrp.py
+pip install pytest
+python -m pytest tests/          # all test files (~2 min)
+python tests/validate_ber.py     # uncoded QAM BER vs closed-form AWGN theory
 ```
 
+The older test files also run on their own (`python tests/test_modules.py`).
+
 `test_modules.py` validates constellation energy, noiseless modulation
-round-trip, MCS/TBS, TDL fading power normalisation, monotone BICM capacity,
-and genuine LDPC coding gain.
+round-trip, MCS/TBS, TDL fading power normalisation, the AWGN MIMO channel,
+monotone BICM capacity, the code-block-aware TB error model, and genuine LDPC
+coding gain.
 
 `test_link_adaptation.py` holds regression tests for the link-adaptation path.
 They check that:
@@ -268,9 +304,10 @@ They check that:
 `test_cdl_pdp.py` checks that the CDL generator reproduces the TR 38.901 power
 delay profile. It checks that:
 
-- the tables' delays, powers and LOS power equal the TR 38.901 values shipped
-  with NVIDIA Sionna. This check is skipped unless Sionna's data files are
-  present (`pip install --no-deps sionna`).
+- every column of the CDL tables (delays, powers, angles, per-cluster
+  spreads, XPR and the LOS ray) equals the TR 38.901 values shipped with
+  NVIDIA Sionna. This check is skipped unless Sionna's data files are present
+  (`pip install --no-deps sionna`).
 - each table is normalised to unit RMS delay spread, and the CDL-D/E K-factors
   are 13.3 / 22.0 dB
 - every cluster's power, recovered from the generated H(f) by least squares on
@@ -313,6 +350,14 @@ and applies each TRP's gain, timing, phase and frequency offset.
 - SIC with one codeword equals MMSE, and error propagation is accounted for
 - weighted MIESM
 
+`test_fd_interleaving.py` covers the pieces of the FD interleaving study:
+
+- the NR interleaver reproduces f(j) = rC + c for 32 PRB, L = 4, and is a permutation for any BWP size, offset and L
+- the 4 × 8 block interleaver maps VRB v to PRB 4 (v mod 8) + ⌊v/8⌋, and the 32 × 8 one maps it to 32 (v mod 8) + ⌊v/8⌋
+- code-block segmentation matches hand-worked TS 38.212 examples, and K′·C and ΣE_r add up for every rank and MCS of the study
+- a forced minimum of 44 code blocks gives at least 4 code blocks in every OFDM symbol at 256 PRB, for every rank and MCS
+- the per-code-block averaging equals an explicit loop over the resource elements
+
 ---
 
 ## Codeword-to-layer mapping studies (Nokia, Apple, 2-TRP CJT)
@@ -352,6 +397,28 @@ second TRP at 0 / −6 / −10 dB. CJT raises SE by 20–70 % but balances the
 layers, so more codewords gain no more than with one TRP: +1 to +6 % with
 LMMSE, up to +14 % with SIC. See
 **[docs/cw2lm-mtrp.md](docs/cw2lm-mtrp.md)**.
+
+---
+
+## Frequency-domain (VRB-to-PRB) interleaving
+
+`examples/fd_interleaving.py` compares FD interleavers for a PDSCH that uses
+the whole band: 32T4R, CDL-A at DS 30 ns, PRG 4 with SVD precoding, rank
+adaptation, and the NR codeword-to-layer mapping. The interleavers are NR's
+interleaved VRB-to-PRB mapping (L = 4) and a 1-PRB R × C block interleaver.
+Each code block's frequency-first RE mapping is modelled from TS 38.211/38.212,
+with a per-code-block BLER. See
+**[docs/fd-interleaving.md](docs/fd-interleaving.md)**.
+
+- **32 PRB, 4 × 8 interleaver.** No measurable gain: at most 0.05 % SE and
+  0.06 dB at 10 % BLER, the same as ideal interleaving. After 32-port
+  beamforming the channel is nearly flat over 32 PRBs, and every code block
+  already spans all layers and at least ¾ of the band.
+- **256 PRB, 32 × 8 interleaver, at least 4 code blocks per OFDM symbol**
+  (`--setup 256prb`). The 32 × 8 interleaver gains 0.9–2.3 % SE between 0
+  and 20 dB and 0.15–0.48 dB at 10 % BLER, about 90 % of the ideal-interleaving
+  gain. NR gains 0.6–1.8 % and 0.10–0.41 dB, about 70 % of it, because it only
+  splits each code block over the two halves of the band.
 
 ---
 
@@ -417,7 +484,7 @@ sample-level path for studying synchronisation and CP-overrun.
 * Channel estimation, PMI selection and CQI use ideal-CSI SVD beamforming as a
   practical proxy for the Type-I codebook; DM-RS estimation error is modelled.
 * The `miesm` link abstraction is the standard methodology for producing SE
-  curves; the `ldpc` mode provides a bit-true reference. Neither embeds the full
+  curves; the `ldpc` mode is a bit-true check of the coding chain. Neither embeds the full
   38.212 base-graph shift tables — the LDPC code uses the NR base-graph
   *architecture* (systematic part + dual-diagonal accumulator core, lifted by
   circular shifts) rather than the exact tabulated coefficients.

@@ -195,15 +195,13 @@ def ideal_amc(sinr_lin, n_layers: int, n_re_per_rb: int, n_prb: int,
 # default size-dependent slope of _waterfall.
 
 def cb_segmentation(tbs: int, code_rate: float):
-    """(C, K') = number of code blocks and bits per code block (incl. CRCs)."""
-    a = int(tbs)
-    b = a + (24 if a > 3824 else 16)                       # TB CRC
-    bg2 = a <= 292 or (a <= 3824 and code_rate <= 0.67) or code_rate <= 0.25
-    k_cb = 3840 if bg2 else 8448
-    if b <= k_cb:
-        return 1, b
-    c = int(np.ceil(b / (k_cb - 24)))                      # 24-bit CB CRC each
-    return c, (b + 24 * c) / c
+    """(C, K') = number of code blocks and bits per code block (incl. CRCs).
+
+    TS 38.212 5.2.2 via :func:`nrdlsim.ldpc.segment_transport_block`.
+    """
+    from .ldpc import segment_transport_block
+    s = segment_transport_block(int(tbs), code_rate)
+    return s.c, s.k_prime
 
 
 def _cb_waterfall(qm, code_rate, k_cb, slope):
@@ -245,20 +243,21 @@ def cb_re_weights(n_rb: int, n_cb: int, n_re_per_rb: int) -> np.ndarray:
 
     Modulation symbols are layer-mapped round-robin, then mapped to REs
     frequency-first (subcarrier, then OFDM symbol) over the allocation
-    (TS 38.211 7.3.1), and rate matching splits the coded bits evenly over the
-    code blocks.  So code block c occupies one contiguous slice of every
+    (TS 38.211 7.3.1), so code block c occupies one contiguous slice of every
     layer's RE stream, sweeping across the band and wrapping into the next
-    OFDM symbol.  Data REs are taken as n_re_per_rb / 12 full symbols.
+    OFDM symbol.  The per-code-block lengths follow the rate-matching split
+    of TS 38.212 5.4.2.1; data REs are taken as n_re_per_rb / 12 full
+    symbols, without VRB-to-PRB interleaving.  Built on
+    :mod:`nrdlsim.re_mapping`.
     """
-    sc = 12 * n_rb                                   # subcarriers per symbol
-    total = n_re_per_rb * n_rb                       # data REs per layer
-    edges = np.linspace(0, total, n_cb + 1)
-    w = np.zeros((n_cb, n_rb))
-    pos = np.arange(total)
-    rb_of = (pos % sc) // 12
-    cb_of = np.searchsorted(edges, pos, side="right") - 1
-    np.add.at(w, (cb_of, rb_of), 1.0)
-    return w / w.sum(axis=1, keepdims=True)
+    from .ldpc import rate_match_lengths
+    from .re_mapping import (code_block_spans, code_block_prb_fraction,
+                             vrb_to_prb_non_interleaved)
+    # the split depends only on the per-layer RE count, so one layer and
+    # one bit per RE give the per-layer spans directly
+    e_r = rate_match_lengths(n_re_per_rb * n_rb, n_cb, 1, 1)
+    return code_block_prb_fraction(code_block_spans(e_r, 1, 1),
+                                   vrb_to_prb_non_interleaved(n_rb))
 
 
 def mcs_bler(sinr_lin, n_layers: int, mcs: int, n_re_per_rb: int, n_prb: int,

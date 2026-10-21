@@ -13,6 +13,7 @@ when ``fec_mode='ldpc'``.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 import numpy as np
 
 # Lifting size set (TS 38.212 Table 5.3.2-1)
@@ -83,6 +84,58 @@ def choose_lifting_size(k: int, kb: int) -> int:
 
 
 @dataclass
+class CodeBlockSegmentation:
+    """LDPC code-block segmentation of one transport block (TS 38.212 5.2.2)."""
+
+    bg: int          # LDPC base graph (clause 7.2.2)
+    c: int           # number of code blocks C
+    k_prime: int     # bits per code block K' (payload + CRCs, no filler bits)
+    k: int           # bits per code block with filler bits, K = 22 Zc or 10 Zc
+    zc: int          # lifting size Zc
+
+
+def segment_transport_block(tbs: int, code_rate: float,
+                            min_cbs: int = 1) -> CodeBlockSegmentation:
+    """Base graph, TB CRC and code-block segmentation of a ``tbs``-bit TB.
+
+    The TB CRC is 24 bits above 3824 bits, else 16 (clause 7.2.1).  When the
+    CRC-attached TB exceeds K_cb (8448 for BG1, 3840 for BG2) it is split into
+    C = ceil(B / (K_cb - 24)) code blocks, each with its own 24-bit CRC.
+
+    ``min_cbs`` > 1 is not NR: it forces at least that many code blocks
+    (each with a 24-bit CRC; K' rounded up, the remainder being filler bits),
+    for studies that need short code blocks.
+    """
+    bg = select_base_graph(tbs, code_rate)
+    b = tbs + (24 if tbs > 3824 else 16)
+    k_cb = 8448 if bg == 1 else 3840
+    c = 1 if b <= k_cb else math.ceil(b / (k_cb - 24))
+    c = max(c, min_cbs)
+    b_prime = b if c == 1 else b + 24 * c
+    k_prime = math.ceil(b_prime / c)
+    if bg == 1:
+        kb = 22
+    else:
+        kb = 10 if b > 640 else 9 if b > 560 else 8 if b > 192 else 6
+    zc = choose_lifting_size(k_prime, kb)
+    return CodeBlockSegmentation(bg, c, k_prime, (22 if bg == 1 else 10) * zc, zc)
+
+
+def rate_match_lengths(g: int, c: int, n_layers: int, qm: int) -> np.ndarray:
+    """Rate-matching output length E_r of each code block (TS 38.212 5.4.2.1).
+
+    The G coded bits of the TB are shared in units of N_L * Q_m bits (one RE
+    on every layer): the first C - mod(G / (N_L Q_m), C) code blocks get the
+    floor share, the rest the ceiling share, so sum(E_r) = G.
+    """
+    unit = n_layers * qm
+    q = g // unit
+    e = np.full(c, unit * (q // c + 1), dtype=int)
+    e[:c - q % c] = unit * (q // c)
+    return e
+
+
+@dataclass
 class LDPCCode:
     bg: int
     z: int
@@ -118,13 +171,6 @@ def build_code(bg: int, z: int, seed: int = 0) -> LDPCCode:
             base_sys[r, c] = int(rng.integers(0, z))
             rows = np.where(base_sys[:, c] >= 0)[0]
     return LDPCCode(bg, z, kb, mb, base_sys)
-
-
-def _circ_shift(vec: np.ndarray, s: int) -> np.ndarray:
-    """Circular (right) shift of a length-Z block, the QC-LDPC permutation."""
-    if s < 0:
-        return np.zeros_like(vec)
-    return np.roll(vec, s)
 
 
 def encode(code: LDPCCode, info_bits: np.ndarray) -> np.ndarray:

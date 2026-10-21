@@ -8,7 +8,7 @@ import sys, os
 import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from nrdlsim.channel_validation import (table_pdp, merge_equal_delays,
+from nrdlsim.channel_validation import (table_pdp,
                                         rms_delay_spread, los_k_factor_db,
                                         estimate_cluster_pdp, estimate_k_factor_db,
                                         frequency_correlation)

@@ -8,7 +8,7 @@ from nrdlsim.modulation import Modulator, _build_constellation
 from nrdlsim import mcs_tables, tbs as tbs_mod
 from nrdlsim import ldpc as ldpc_mod
 from nrdlsim.channel_models import TDLChannel
-from nrdlsim.link_abstraction import bicm_capacity, required_snr_db
+from nrdlsim.link_abstraction import bicm_capacity
 
 
 def test_constellation_unit_energy():
@@ -62,7 +62,7 @@ def test_code_block_tb_model():
     assert cb_segmentation(100000, 0.9)[0] == 12                  # BG1
     assert cb_segmentation(100000, 0.2)[0] == 27                  # BG2 (R <= 1/4)
     c, k = cb_segmentation(100000, 0.9)
-    assert abs(k * c - (100024 + 24 * c)) < 1e-6                  # CB CRCs added
+    assert 0 <= k * c - (100024 + 24 * c) < c                     # CB CRCs added, K' rounded up
     # TB BLER combines code blocks; the inverse hits the target exactly
     for tbs in (5000, 60000, 500000):
         s = required_eff_sinr_db_tb(6, 0.6, tbs, 0.1)

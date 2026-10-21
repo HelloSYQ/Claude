@@ -13,6 +13,8 @@ dependencies = ["numpy>=1.24"]
 [project.optional-dependencies]
 # examples, notebooks and plotting scripts
 examples = ["scipy>=1.10", "matplotlib>=3.6"]
+# test suite: python -m pytest tests/
+test = ["pytest>=7", "scipy>=1.10", "matplotlib>=3.6"]
 
 [tool.setuptools]
 packages = ["nrdlsim"]

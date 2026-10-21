@@ -13,8 +13,9 @@ Per-slot processing chain (TS 38.211/212/214 aligned):
 Two FEC modes:
   * 'miesm' (default): fast link abstraction predicting BLER from post-equaliser
     SINRs — used to sweep full spectral-efficiency curves.
-  * 'ldpc' : bit-true QC-LDPC coding on a representative code block, for
-    validation on small configurations.
+  * 'ldpc' : bit-true QC-LDPC encoding and min-sum decoding of one fixed-size
+    code block at the allocation's mean SINR, to check the coding chain on
+    small configurations.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ from .channel_models import TDLChannel, CDLChannel, awgn_frequency_response
 from .csi import compute_csi, CSIFeedbackChannel, CSIReport
 from .scheduler import Scheduler
 from .layer_mapping import svd_precoder
-from .receiver import estimate_channel_from_dmrs, per_re_sinr, mmse_equalize
+from .receiver import estimate_channel_from_dmrs, per_re_sinr
 from .link_abstraction import (effective_sinr_miesm,
                                bler_from_effective_sinr)
 from .modulation import Modulator
@@ -257,15 +258,20 @@ class NRDownlinkSimulator:
 
     # ------------------------------------------------------------------
     def _ldpc_block(self, info, sinr_lin, tb_bits, rng) -> bool:
-        """Bit-true single-code-block transmission for validation runs."""
+        """Bit-true single-code-block transmission for validation runs.
+
+        One BG2-sized QC-LDPC block (Z = 32: 320 info bits, 1664 coded bits,
+        rate about 1/5, no rate matching) with the MCS's modulation, over
+        AWGN at the allocation's mean post-MMSE SINR.  The MCS code rate and the per-RE SINR
+        spread are not modelled, so this checks the coding chain rather than
+        predicting the MCS's BLER.
+        """
         qm = info.modulation_order
-        rate = info.target_code_rate
         # size a small code block for tractable min-sum decoding
         z = 32
         bg = 2
         code = ldpc_mod.build_code(bg, z)
         k = code.k_bits
-        n = code.n_bits
         info_bits = rng.integers(0, 2, size=k).astype(np.int8)
         cw = ldpc_mod.encode(code, info_bits)
 
