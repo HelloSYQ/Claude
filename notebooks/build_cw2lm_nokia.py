@@ -1,5 +1,6 @@
 """Generate notebooks/CW2LM_Nokia_Comparison.ipynb, without outputs (run it
 in Jupyter, or render with ``jupyter nbconvert --to html --execute``)."""
+import hashlib
 import os
 
 import nbformat as nbf
@@ -8,33 +9,43 @@ nb = nbf.v4.new_notebook()
 cells = []
 
 
+def _add(new_cell, text):
+    # cell id from the cell's text, so regenerating changes only edited cells
+    src = text.strip("\n")
+    cid = hashlib.sha1(src.encode()).hexdigest()[:8]
+    while any(c.id == cid for c in cells):
+        cid = hashlib.sha1(cid.encode()).hexdigest()[:8]
+    cells.append(new_cell(src, id=cid))
+
+
 def md(text):
-    cells.append(nbf.v4.new_markdown_cell(text.strip("\n")))
+    _add(nbf.v4.new_markdown_cell, text)
 
 
 def co(text):
-    cells.append(nbf.v4.new_code_cell(text.strip("\n")))
+    _add(nbf.v4.new_code_cell, text)
 
 
 md(r"""
-# Codeword-to-layer mapping: Nokia R1-2607066 without SIC
+# Codeword-to-layer mapping: Nokia R1-2607066, Apple R1-2608231 and 2-TRP CJT
 
 Nokia's RAN1 #126bis contribution R1-2607066 proposes multi-codeword (MCW) PDSCH from rank 2, with up to four codewords. Its link-level evidence is:
 
 | Nokia | Content |
 |---|---|
 | Fig. 26 | SE vs SNR, fixed rank 1–4, one codeword (NR) vs one codeword per layer, MMSE |
-| Fig. 28 | rank 4 with 1, 2 and 4 codewords (here without the SIC curves) |
+| Fig. 28 | rank 4 with 1, 2 and 4 codewords, with and without SIC (SIC in §10) |
 | Table 3 | rank-transition SNR, SCW vs MCW |
 | Table 4 | envelope SE gain of MCW over SCW at −5 / 10 / 20 / 30 dB |
 
-This notebook repeats that evaluation in `nrdlsim` with Nokia's Annex B (Table 11) assumptions, **without the SIC receiver**. It does three things:
+This notebook repeats that evaluation in `nrdlsim` with Nokia's Annex B (Table 11) assumptions, first **without the SIC receiver**. It does four things:
 
 1. Explains the modules added for the study (§1–§5).
 2. Runs a small live version (§6).
 3. Compares the full 400-drop run with Nokia's digitized curves (§7–§9).
+4. Adds the SIC and R-ML receivers (§10), Apple R1-2608231's set-up, which reaches the opposite conclusion (§11), and 2-TRP coherent joint transmission (§12).
 
-Written report: [`docs/cw2lm-nokia.md`](../docs/cw2lm-nokia.md). Full run: `python examples/cw2lm_nokia.py --drops 400` (about 2 min on 4 cores).
+Written reports: [`docs/cw2lm-nokia.md`](../docs/cw2lm-nokia.md), [`docs/cw2lm-apple.md`](../docs/cw2lm-apple.md), [`docs/cw2lm-mtrp.md`](../docs/cw2lm-mtrp.md). Full run: `python examples/cw2lm_nokia.py --drops 400` (about 2 min on 4 cores).
 """)
 
 co(r"""

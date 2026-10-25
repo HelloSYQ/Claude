@@ -1,16 +1,27 @@
 """Generate the comprehensive guided-tour notebook for nrdlsim."""
+import hashlib
+
 import nbformat as nbf
 
 nb = nbf.v4.new_notebook()
 cells = []
 
 
+def _add(new_cell, text):
+    # cell id from the cell's text, so regenerating changes only edited cells
+    src = text.strip("\n")
+    cid = hashlib.sha1(src.encode()).hexdigest()[:8]
+    while any(c.id == cid for c in cells):
+        cid = hashlib.sha1(cid.encode()).hexdigest()[:8]
+    cells.append(new_cell(src, id=cid))
+
+
 def md(text):
-    cells.append(nbf.v4.new_markdown_cell(text.strip("\n")))
+    _add(nbf.v4.new_markdown_cell, text)
 
 
 def co(text):
-    cells.append(nbf.v4.new_code_cell(text.strip("\n")))
+    _add(nbf.v4.new_code_cell, text)
 
 
 # ---------------------------------------------------------------- title
@@ -20,15 +31,19 @@ md(r"""
 A complete, modular **5G NR (New Radio) downlink (PDSCH) link-level simulator**.
 This notebook walks through **every module**, explains what it does and which
 3GPP specification it follows, and runs a live demo of each one — ending with a
-full spectral-efficiency curve and the calibration against published 3GPP /
-5G-IA results.
+full spectral-efficiency curve, the validation and calibration against
+published 3GPP / 5G-IA results, and an index of the studies built on the
+simulator.
+
+The notebook is stored without outputs. Run all cells (about 3 minutes) to see
+the plots.
 
 | Spec | Covers |
 |------|--------|
-| **TS 38.211** | numerology, resource grid, DM-RS, modulation, layer mapping |
+| **TS 38.211** | numerology, DM-RS, modulation, layer mapping, RE and VRB-to-PRB mapping |
 | **TS 38.212** | DL-SCH coding: CRC, segmentation, LDPC, rate matching |
 | **TS 38.214** | MCS/TBS, CSI (CQI/PMI/RI), link adaptation |
-| **TR 38.901** | channel models (TDL, CDL), antenna panels & patterns |
+| **TR 38.901** | channel models (TDL, CDL), antenna panels, patterns and orientation |
 
 ### The per-slot processing chain
 
@@ -139,7 +154,7 @@ print("tiny allocation TBS (floor rule):", tbs_mod.compute_tbs(12, 1, 4, 616/102
 
 # ---------------------------------------------------------------- grid
 md(r"""
-## 3 · `resource_grid.py` — resource grid & DM-RS overhead  *(TS 38.211 §7.4.1)*
+## 3 · `resource_grid.py` — DM-RS and data-RE accounting  *(TS 38.211 §7.4.1)*
 
 The PDSCH does not fill the whole slot: **DM-RS** (demodulation reference
 signals) occupy some resource elements for channel estimation. This module
@@ -219,13 +234,16 @@ plt.show()
 
 # ---------------------------------------------------------------- CDL
 md(r"""
-## 5b · `channel_models.py` — CDL channel, dual-pol UPA & antenna pattern  *(TR 38.901 §7.3/7.5/7.7.1)*
+## 6 · `channel_models.py` — CDL channel, dual-pol UPA & antenna pattern  *(TR 38.901 §7.3/7.5/7.7.1)*
 
 **Clustered Delay Line** models specify per-cluster **angles**
 (AoD/AoA/ZoD/ZoA). The MIMO channel is synthesised geometrically from
 **uniform planar array** steering vectors with the full **dual-polarized**
 coefficient (2×2 cross-pol coupling + XPR), and each element can carry the
 **3GPP directional radiation pattern** (Table 7.3-1).
+
+The cluster tables are those of TR 38.901 Tables 7.7.1-1…5. §8 shows how both
+the tables and the generated channel are checked against the spec.
 """)
 co(r"""
 from nrdlsim.channel_models import CDLChannel, element_power_gain, _CDL
@@ -255,20 +273,219 @@ H = ch.frequency_response(freqs, 0.0)
 print("dual-pol UPA channel H shape [freq, rx, tx] =", H.shape)
 """)
 
+# ---------------------------------------------------------------- orientation
+md(r"""
+## 7 · Antenna orientation and the UE handset  *(TR 38.901 §7.1.3, §7.3)*
+
+Every panel has an orientation: bearing α (boresight azimuth), mechanical
+downtilt β and slant γ (a roll about the boresight). `rotation_matrix(α, β, γ)`
+is R = Rz(α)·Ry(β)·Rx(γ) of eq. 7.1-4. The CDL model applies that one rotation
+consistently to:
+
+* the **element positions**, so the array's steering vectors turn with it;
+* the **element pattern**: global angles are rotated into the element's local
+  frame (eqs. 7.1-7/7.1-8) before Table 7.3-1 is evaluated;
+* the **polarization**: the local field is expressed in global coordinates
+  (eqs. 7.1-11/7.1-15), so a rolled or tilted panel also turns its
+  polarization.
+
+`CDLChannel` takes the gNB orientation (`boresight_az_deg`, `downtilt_deg`,
+`slant_deg`) and the UE's (`rx_boresight_az_deg`, `rx_downtilt_deg`,
+`rx_slant_deg`). The UE can have its own element (`rx_element_*`) or an
+explicit element list such as the edge-mounted **handset** of
+`ut_handset_array`: directional elements on the four edges of a 15 × 7 cm
+device, each pointing out of its edge. `tests/test_antenna_orientation.py`
+checks the rotation against the spec's closed-form expressions.
+""")
+co(r"""
+from nrdlsim.channel_models import (rotation_matrix, element_field, ut_handset_array,
+                                    UT_HANDSET_ELEMENT)
+
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 3.8))
+# a mechanical downtilt moves the pattern peak below the horizon
+zen = np.linspace(60, 120, 241)
+for tilt in (0, 10):
+    a1.plot(zen, 10*np.log10(element_power_gain(0.0, zen, downtilt_deg=tilt)),
+            label=f"downtilt {tilt}°")
+a1.axvline(90, ls=":", color="gray")
+a1.set_xlabel("zenith angle (deg, 90 = horizon)"); a1.set_ylabel("gain (dBi)")
+a1.set_title("gNB element, elevation cut at boresight"); a1.legend()
+
+# the 4-Rx handset (elements 1, 3, 5, 7): one element on each edge.  The top and
+# bottom elements point up and down, so their pattern's pole lies on the horizon,
+# where its azimuth is undefined: sample half a degree off it.
+hs = ut_handset_array(3.5e9, (1, 3, 5, 7))
+az_h = np.arange(-179.5, 180, 1.0)
+for n, edge, ls, (bearing, tilt, _) in zip((1, 3, 5, 7), ("top", "right", "bottom", "left"),
+                                           ("-", "-", "--", "-"), hs["rotation_deg"]):
+    a2.plot(az_h, 10*np.log10(element_power_gain(az_h, 90.0, bearing, tilt,
+                                                  **UT_HANDSET_ELEMENT)),
+            ls=ls, label=f"element {n} ({edge} edge)")
+a2.set_xlabel("azimuth (deg)"); a2.set_ylabel("gain (dBi)")
+a2.set_title("Upright handset facing azimuth 0, horizon cut"); a2.legend(fontsize=8)
+plt.show()
+
+# a slant (roll) turns the polarization of a vertically polarized element
+for s in (0, 45, 90):
+    F, _ = element_field(0.0, 90.0, np.deg2rad([0.0]), rotation_matrix(slant_deg=s))
+    print(f"slant {s:2d} deg -> polarization angle at boresight "
+          f"{np.rad2deg(np.arctan2(F[0, 1], F[0, 0])):.0f} deg")
+
+# a CDL channel to the handset, screen facing azimuth 30 deg and tilted 60 deg up
+ch_ut = CDLChannel("CDL-C", 100, 10, n_tx=8, n_rx=4, tx_pol=2, tx_layout=(2, 2),
+                   rx_elements=hs, rx_pattern="38.901",
+                   rx_element_max_gain_dbi=UT_HANDSET_ELEMENT["g_max_dbi"],
+                   rx_element_hpbw_deg=UT_HANDSET_ELEMENT["hpbw_deg"],
+                   rx_element_front_back_db=UT_HANDSET_ELEMENT["front_back_db"],
+                   rx_boresight_az_deg=30, rx_downtilt_deg=-60,
+                   rng=np.random.default_rng(0))
+print("handset channel H shape [freq, rx, tx] =", ch_ut.frequency_response(freqs, 0.0).shape)
+""")
+
+# ---------------------------------------------------------------- channel validation
+md(r"""
+## 8 · `channel_validation.py` — verifying the CDL generator
+
+A CDL frequency response is a sum of cluster terms,
+H(f) = Σ_c H_c·exp(−j2πfτ_c), with E|H_c|² equal to the table power P_c.
+`channel_validation` checks the *generated* channel against that definition:
+
+1. **Cluster powers.** Over a very wide synthetic band the cluster exponentials
+   are nearly orthogonal, so least squares on the table delays recovers every
+   H_c. The mean |H_c|² must reproduce the table, and the residual must be ~0:
+   all the energy sits at the table delays.
+2. **Delay spread.** The RMS delay spread of the recovered PDP must equal the
+   configured DS.
+3. **Frequency correlation.** E[H(f)·H*(f+Δf)] on a real band must equal the
+   Fourier transform of the PDP.
+4. **K-factor** (CDL-D/E). The LOS ray keeps its phase from drop to drop, so the
+   mean of the delay-0 coefficient isolates it.
+
+`tests/test_cdl_pdp.py` runs these checks for CDL-A…E. It also compares the
+tables themselves with the TR 38.901 tables shipped with Sionna
+(`pip install --no-deps sionna` enables that check), since the generator tests
+can only compare the channel with *our* tables. `examples/verify_cdl_pdp.py`
+is the full version.
+""")
+co(r"""
+from nrdlsim import channel_validation as cv
+
+pdp = cv.estimate_cluster_pdp("CDL-C", ds_ns=100, n_drops=100)
+lag, R_emp, R_th = cv.frequency_correlation("CDL-C", ds_ns=100, n_drops=30, max_lag=60)
+
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 3.8))
+a1.plot(pdp["tau_ns"], 10*np.log10(pdp["p_ref"]), "o", mfc="none", color="#6b7280",
+        ms=9, label="TR 38.901 table")
+a1.plot(pdp["tau_ns"], 10*np.log10(pdp["p_abs"]), "x", color="#dc2626", ms=7,
+        label="recovered from H(f)")
+a1.set_xlabel("delay (ns)"); a1.set_ylabel("cluster power (dB)")
+a1.set_title("CDL-C, DS = 100 ns, 100 drops"); a1.legend()
+a2.plot(lag/1e6, np.abs(R_th), "k-", label="Fourier transform of the table PDP")
+a2.plot(lag/1e6, np.abs(R_emp), "o", ms=3, color="#2563eb", label="generated channel")
+a2.set_xlabel("frequency separation Δf (MHz)"); a2.set_ylabel("|R(Δf)|")
+a2.set_title("Frequency correlation, 30 drops"); a2.legend()
+plt.show()
+
+print(f"energy outside the table delays: {pdp['worst_residual']:.0e}")
+print(f"RMS delay spread of the recovered PDP: "
+      f"{cv.rms_delay_spread(pdp['tau_ns'], pdp['p_est']):.1f} ns (configured 100 ns)")
+print(f"CDL-D K-factor: recovered {cv.estimate_k_factor_db('CDL-D', n_drops=400):.1f} dB, "
+      f"table {cv.los_k_factor_db('CDL-D'):.1f} dB")
+""")
+
+# ---------------------------------------------------------------- AWGN + SNR
+md(r"""
+## 9 · AWGN MIMO reference channel and the SNR definition
+
+**SNR** in this simulator is Es/N0 **per receive antenna per resource
+element**:
+
+* the transmit power is 1 per RE, split over the layers (precoder `W/√rank`);
+* every channel model is normalised so that each tx–rx link has unit mean
+  power, E|H_us|² = 1;
+* the noise variance per receive antenna is N0 = 10^(−SNR/10).
+
+So the SNR does not include beamforming or array gain. That gain shows up in
+the post-equaliser SINR, which is what CSI, link adaptation and the BLER model
+work with.
+
+`ChannelConfig(model="AWGN")` uses `awgn_frequency_response`: a static,
+frequency-flat channel whose links all have unit gain and whose rows (or
+columns) are orthogonal — the first rows or columns of an N-point DFT matrix,
+N = max(Nt, Nr). Each of its min(Nt, Nr) eigenmodes therefore has gain N: no
+fading and no angular structure, but the full array gain. SISO reduces to
+H = 1.
+""")
+co(r"""
+from nrdlsim.channel_models import awgn_frequency_response
+from nrdlsim.layer_mapping import svd_precoder
+from nrdlsim.receiver import batch_mmse_sinr
+
+H_awgn = awgn_frequency_response(1, 4, 2)          # [freq, rx, tx]: 4 Tx, 2 Rx
+print(np.round(H_awgn[0], 2))
+print("|H_us|^2 of every link:", np.unique(np.round(np.abs(H_awgn)**2, 9)),
+      "| eigenvalues of H H^H:",
+      np.round(np.linalg.eigvalsh(H_awgn[0] @ H_awgn[0].conj().T), 6))
+
+# rank 1 gets SNR + 10 log10(4) = 16 dB: the array gain is in the SINR, not the SNR
+snr_db = 10.0
+for r in (1, 2):
+    W = svd_precoder(H_awgn, r) / np.sqrt(r)       # total power 1, split over r layers
+    sinr_db = 10*np.log10(batch_mmse_sinr(H_awgn @ W, 10**(-snr_db/10))[0])
+    print(f"SNR {snr_db:.0f} dB, rank {r}: post-MMSE SINR per layer {np.round(sinr_db, 2)} dB")
+""")
+
+# ---------------------------------------------------------------- multi-TRP
+md(r"""
+## 10 · `MultiTRPChannel` — several TRPs serving one UE
+
+For multi-TRP transmission such as coherent joint transmission (CJT),
+`MultiTRPChannel` stacks per-TRP channels along the transmit ports,
+H = [a₁H₁, a₂H₂, …]. Each TRP k has its own received-power offset
+(`gains_db`), arrival-time offset at the UE (`delays_ns`, which becomes a
+phase ramp across the band), static phase (`phase_deg`) and residual
+frequency offset (`freq_offset_hz`). `port_slices[k]` gives TRP k's ports. The
+2-TRP CJT codeword-mapping study (`examples/cw2lm_mtrp.py`) is built on it.
+""")
+co(r"""
+from nrdlsim.channel_models import MultiTRPChannel
+
+trps = [CDLChannel("CDL-A", 30, 10, n_tx=32, n_rx=4, tx_pol=2, rx_pol=2,
+                   tx_layout=(2, 8), rx_layout=(1, 2), rng=np.random.default_rng(s))
+        for s in (1, 2)]
+mtrp = MultiTRPChannel(trps, gains_db=[0, -6], delays_ns=[0, 300])
+H_mt = mtrp.frequency_response(freqs, 0.0)
+print("stacked channel [freq, rx, tx]:", H_mt.shape, "| TRP ports:", mtrp.port_slices)
+
+# TRP 2's block is its own channel times a_2 = 10^(-6/20) exp(-j 2 pi f 300 ns)
+a_2 = H_mt[:, :, mtrp.port_slices[1]] / trps[1].frequency_response(freqs, 0.0)
+slope = np.polyfit(freqs, np.unwrap(np.angle(a_2[:, 0, 0])), 1)[0]
+print(f"TRP 2: |a_2| = {20*np.log10(np.abs(a_2).mean()):.1f} dB, "
+      f"timing offset from the phase slope = {-slope/(2*np.pi)*1e9:.0f} ns")
+""")
+
 # ---------------------------------------------------------------- layer mapping
 md(r"""
-## 6 · `layer_mapping.py` — layer mapping & precoding  *(TS 38.211 §7.3.1)*
+## 11 · `layer_mapping.py` — layer mapping & precoding  *(TS 38.211 §7.3.1)*
 
 Codeword symbols are distributed across transmission layers (Table 7.3.1.3-1),
 then mapped to antenna ports by a precoder. `svd_precoder` gives the
 closed-loop eigen-beamforming precoder; open-loop uses an identity/DFT mapping.
+
+`layer_groups(rank, max_codewords)` says which layers each codeword carries.
+NR uses one codeword up to rank 4 and two from rank 5, the smaller group first
+(rank 5 → 2 + 3 layers). The codeword-to-layer mapping studies also allow more
+codewords, up to one per layer.
 """)
 co(r"""
-from nrdlsim.layer_mapping import layer_map, svd_precoder, num_codewords
+from nrdlsim.layer_mapping import layer_map, svd_precoder, num_codewords, layer_groups
 
 cw = [np.arange(12)]                       # one codeword, 12 symbols
 layers = layer_map(cw, num_layers=2)
 print("codewords for rank 2:", num_codewords(2), "| layer array shape:", layers.shape)
+for n_cw in (1, 2, 4):
+    print(f"rank 4, up to {n_cw} codeword(s): {layer_groups(4, n_cw)}")
+print("rank 5, NR (2 codewords):", layer_groups(5, 2))
 
 W = svd_precoder(H, num_layers=2)          # per-subcarrier precoder
 print("SVD precoder W shape [freq, n_tx, layers] =", W.shape)
@@ -278,12 +495,42 @@ print("columns orthonormal? W^H W ≈ I:",
 
 # ---------------------------------------------------------------- ldpc
 md(r"""
-## 7 · `ldpc.py` — DL-SCH coding chain  *(TS 38.212 §5, §7.2)*
+## 12 · `ldpc.py` — DL-SCH coding chain  *(TS 38.212 §5, §7.2)*
 
 The bit-true FEC: **CRC** attachment (24A/24B/16), code-block **segmentation**,
 **base-graph** selection (BG1/BG2), a **QC-LDPC** encoder (NR base-graph
-architecture: systematic part + dual-diagonal accumulator core), and a
-normalised **min-sum** decoder. Here it demonstrates genuine coding gain.
+architecture: systematic part + dual-diagonal accumulator core), a normalised
+**min-sum** decoder, and the **rate-matching** split of the coded bits over the
+code blocks.
+
+**Segmentation and rate matching.** A transport block gets a 24-bit CRC (16
+bits up to 3824 bits). If it is then longer than the largest code block (8448
+bits for BG1, 3840 for BG2), it is split into C code blocks, each with its own
+24-bit CRC (`segment_transport_block`, §5.2.2). The G coded bits that fit the
+allocation are shared out in units of one RE on every layer (N_L·Q_m bits): the
+first code blocks get the floor share and the rest the ceiling share, so
+ΣE_r = G (`rate_match_lengths`, §5.4.2.1).
+""")
+co(r"""
+from nrdlsim.ldpc import segment_transport_block, rate_match_lengths
+
+n_re_rb = tbs_mod.re_per_rb(13, 24, 0)              # data REs per PRB
+for n_prb, mcs, nl in [(51, 5, 1), (106, 16, 2), (273, 27, 4)]:
+    i = mcs_tables.get_mcs(mcs, 2)
+    tb = tbs_mod.compute_tbs(n_re_rb, n_prb, i.modulation_order, i.target_code_rate, nl)
+    seg = segment_transport_block(tb, i.target_code_rate)
+    G = n_re_rb * n_prb * nl * i.modulation_order   # coded bits of the allocation
+    e_r = rate_match_lengths(G, seg.c, nl, i.modulation_order)
+    print(f"{n_prb:3d} PRB, MCS {mcs:2d} ({i.modulation_name}), rank {nl}: TBS {tb:7d} -> "
+          f"BG{seg.bg}, C = {seg.c:3d} code blocks of K' = {seg.k_prime} bits, "
+          f"E_r in {sorted(set(e_r.tolist()))}, sum = G: {e_r.sum() == G}")
+""")
+md(r"""
+The decoder demonstrates genuine coding gain. The link simulator's
+`fec_mode='ldpc'` runs this kind of check: one fixed-size code block (BG2
+dimensions, Z = 32, rate about 1/5) at the allocation's mean post-MMSE SINR. It
+checks the coding chain rather than predicting the BLER of the scheduled MCS;
+spectral-efficiency curves use the link abstraction (§14–§15).
 """)
 co(r"""
 from nrdlsim import ldpc as L
@@ -310,14 +557,77 @@ print("decode success @ -6 dB:", decode_rate(-6.0))
 print("decode success @ +6 dB:", decode_rate(+6.0), "  <- coding gain")
 """)
 
+# ---------------------------------------------------------------- re mapping
+md(r"""
+## 13 · `re_mapping.py` — code blocks on the grid and VRB-to-PRB interleaving  *(TS 38.211 §7.3.1.3, §7.3.1.5–7.3.1.6)*
+
+Where a code block lands sets its frequency diversity. The rate-matched code
+blocks are concatenated, modulated and dealt round-robin to the layers, so code
+block r takes the same E_r/(Q_m·N_L) consecutive REs on every layer
+(`code_block_spans`). Each layer is mapped **frequency first**: across the
+subcarriers of the allocated virtual resource blocks (VRBs), then OFDM symbol
+by OFDM symbol. A code block shorter than an OFDM symbol therefore sits in one
+contiguous slice of the band, unless the **VRB-to-PRB mapping** spreads it:
+
+* `vrb_to_prb_non_interleaved`: PRB = VRB;
+* `vrb_to_prb_nr_interleaved`: NR's interleaver (bundles of L RBs and a 2-row
+  block interleaver, §7.3.1.6);
+* `vrb_to_prb_block_interleaver`: an R × C block interleaver, written in rows
+  and read in columns.
+
+The demo uses the 256-PRB set-up of the FD-interleaving study: rank 2, MCS 20,
+and at least 44 code blocks, so that every OFDM symbol holds at least four.
+""")
+co(r"""
+from nrdlsim.re_mapping import (code_block_spans, code_block_prb_fraction,
+                                vrb_to_prb_non_interleaved, vrb_to_prb_nr_interleaved,
+                                vrb_to_prb_block_interleaver)
+
+n_prb, nl = 256, 2
+i = mcs_tables.get_mcs(20, 2); qm_cb = i.modulation_order
+tb = tbs_mod.compute_tbs(n_re_rb, n_prb, qm_cb, i.target_code_rate, nl)
+seg = segment_transport_block(tb, i.target_code_rate, min_cbs=44)
+G = n_re_rb * n_prb * nl * qm_cb
+spans = code_block_spans(rate_match_lengths(G, seg.c, nl, qm_cb), qm_cb, nl)
+print(f"TBS {tb}: {seg.c} code blocks of {spans[0, 1] - spans[0, 0]} REs per layer; "
+      f"one OFDM symbol has {12 * n_prb} REs per layer")
+
+maps = {"non-interleaved": vrb_to_prb_non_interleaved(n_prb),
+        "NR interleaver, L = 4": vrb_to_prb_nr_interleaved(n_prb, 4),
+        "32 × 8 block interleaver": vrb_to_prb_block_interleaver(32, 8)}
+fig, axes = plt.subplots(1, 3, figsize=(16, 3.8), sharey=True)
+for ax, (name, m) in zip(axes, maps.items()):
+    frac = code_block_prb_fraction(spans, m)               # (code block, PRB)
+    ax.imshow(frac > 0, aspect="auto", cmap="Blues", interpolation="nearest")
+    n_sub = ((frac.reshape(seg.c, 8, -1).sum(-1) > 0).sum(1))   # of 8 32-PRB sub-bands
+    span = (f"{n_sub.min()}" if n_sub.min() == n_sub.max()
+            else f"{n_sub.min()}–{n_sub.max()}")
+    ax.set_title(f"{name}\neach code block in {span} of 8 sub-bands of 32 PRB")
+    ax.set_xlabel("PRB"); ax.grid(False)
+axes[0].set_ylabel("code block")
+plt.show()
+""")
+md(r"""
+Without interleaving each code block covers 64 contiguous PRBs. NR's
+interleaver splits it over the two halves of the band, and the 32 × 8 block
+interleaver spreads it over the whole band. In the study
+(`examples/fd_interleaving.py`, `docs/fd-interleaving.md`) the 32 × 8
+interleaver gains 0.9–2.3 % SE and 0.15–0.48 dB at 10 % BLER at 256 PRB, about
+90 % of the gain of ideal interleaving; NR's gains about 70 % of it. At 32 PRB
+there is no measurable gain: after 32-port beamforming the channel is nearly
+flat over 32 PRBs, and every code block already spans at least ¾ of the band.
+""")
+
 # ---------------------------------------------------------------- link abstraction
 md(r"""
-## 8 · `link_abstraction.py` — BICM capacity & MIESM
+## 14 · `link_abstraction.py` — BICM capacity & MIESM
 
 For fast full-curve sweeps the coded BLER is predicted from the per-RE SINRs.
 The chain is: map each SINR to its **bit-interleaved coded-modulation (BICM)
 mutual information**, compress across REs to an **effective SINR** (MIESM), then
 apply an NR-LDPC BLER waterfall. The BICM capacity curves are shown below.
+`effective_sinr_miesm` can also weight the samples, which the R-ML receiver
+abstraction uses (§18).
 
 The waterfall is a logistic curve. Its 50 % point sits at the capacity SNR plus
 a coding gap, and it gets steeper as the transport block gets longer.
@@ -355,9 +665,86 @@ a2.set_title("BLER waterfall; dots = required_eff_sinr_db(..., 0.1)")
 a2.legend(fontsize=8); plt.show()
 """)
 
+# ---------------------------------------------------------------- code-block TB model
+md(r"""
+## 15 · `link_abstraction.py` — code-block-aware TB errors and ideal AMC
+
+The model of §14 treats a transport block as one long code with one effective
+SINR. A real TB is decoded code block by code block (§12), and it fails if
+**any** of them fails:
+
+TB BLER = 1 − Π_c (1 − BLER_cb,c),
+
+with each code block on the waterfall of its own size, at the effective SINR of
+its own REs (§13). `cb_re_weights` gives each code block's share of every RB,
+`mi_to_eff_sinr_db` turns a code block's mean mutual information back into an
+effective SINR, and `tb_bler_from_cb_sinrs` combines the code blocks.
+`required_eff_sinr_db_tb` is the inverse when all code blocks see the same
+SINR: each must then reach a BLER of 1 − (1 − target)^(1/C).
+
+Two effects make a large TB harder than the single-waveform model predicts:
+
+* **Every code block must succeed.** Code blocks are at most 8448 bits, so the
+  waterfall stops getting steeper, while the per-block target tightens with C.
+* **The weakest code block.** On a frequency-selective channel the code blocks
+  see different SINRs, and the worst one dominates.
+
+The FD-interleaving and 400 MHz TB-split studies use this model. The main
+simulator (`NRDownlinkSimulator`) still uses the single-waveform model.
+
+`ideal_amc` is the genie link adaptation of the codeword-mapping studies: the
+MCS with the most expected bits, TBS·(1 − BLER), on the given SINRs.
+""")
+co(r"""
+from nrdlsim.link_abstraction import (effective_sinr_miesm, required_eff_sinr_db_tb,
+                                      cb_segmentation, cb_re_weights, mi_to_eff_sinr_db,
+                                      tb_bler_from_cb_sinrs, ideal_amc)
+
+i = mcs_tables.get_mcs(20, 2); qm_tb, R = i.modulation_order, i.target_code_rate
+fig, (a1, a2) = plt.subplots(1, 2, figsize=(14, 3.8))
+# 1) SINR needed for a 10 % TB BLER vs TBS, the same SINR on every code block
+tbs_grid = np.unique(np.logspace(np.log10(500), 6, 60).astype(int))
+a1.semilogx(tbs_grid, [required_eff_sinr_db(qm_tb, R, t, 0.1) for t in tbs_grid],
+            label="one waveform per TB (§14)")
+a1.semilogx(tbs_grid, [required_eff_sinr_db_tb(qm_tb, R, t, 0.1) for t in tbs_grid],
+            label="code-block model")
+a1.set_xlabel("TBS (bits)"); a1.set_ylabel("effective SINR for 10 % BLER (dB)")
+a1.set_title(f"MCS 20 ({i.modulation_name}, R = {R:.2f})"); a1.legend()
+
+# 2) the weakest code block: frequency-selective SISO channel, 106 PRB
+h2 = np.abs(TDLChannel("TDL-C", 300, 10, n_tx=1, n_rx=1, rng=np.random.default_rng(4))
+            .frequency_response(freqs, 0.0)[:, 0, 0])**2
+tb = tbs_mod.compute_tbs(n_re_rb, 106, qm_tb, R, 1)
+C = cb_segmentation(tb, R)[0]
+w_cb = cb_re_weights(106, C, n_re_rb)                    # (code block, RB)
+def tb_blers(snr_db):
+    sinr_rb = h2 * 10**(snr_db/10)
+    eff_cb = mi_to_eff_sinr_db(w_cb @ bicm_capacity(10*np.log10(sinr_rb), qm_tb), qm_tb)
+    eff = effective_sinr_miesm(sinr_rb, qm_tb)
+    return (bler_from_effective_sinr(eff, qm_tb, R, tb),
+            tb_bler_from_cb_sinrs(eff_cb, qm_tb, R, tb), eff, eff_cb)
+snrs = np.arange(20, 30.01, 0.1)
+bl = np.array([tb_blers(s)[:2] for s in snrs])
+a2.semilogy(snrs, bl[:, 0], label="one waveform per TB")
+a2.semilogy(snrs, bl[:, 1], label=f"code-block model ({C} code blocks)")
+a2.axhline(0.1, ls=":", color="gray"); a2.set_ylim(1e-3, 1)
+a2.set_xlabel("SNR (dB)"); a2.set_ylabel("TB BLER")
+a2.set_title(f"TDL-C 300 ns, 106 PRB, MCS 20, TBS {tb}"); a2.legend()
+plt.show()
+
+k = int(np.argmin(np.abs(bl[:, 0] - 0.1)))
+b_wf, b_cb, eff, eff_cb = tb_blers(snrs[k])
+print(f"at {snrs[k]:.1f} dB: band effective SINR {eff:.2f} dB, code blocks "
+      f"{eff_cb.min():.2f} to {eff_cb.max():.2f} dB -> TB BLER {b_wf:.2f} (one waveform) "
+      f"vs {b_cb:.2f} (code blocks)")
+mcs_g, tbs_g, bler_g, bits_g = ideal_amc(h2 * 10**(snrs[k]/10), 1, n_re_rb, 106)
+print(f"ideal AMC on the same SINRs: MCS {mcs_g}, TBS {tbs_g}, BLER {bler_g:.2f}, "
+      f"expected {bits_g:.0f} bits")
+""")
+
 # ---------------------------------------------------------------- csi
 md(r"""
-## 9 · `csi.py` — CSI feedback: RI / PMI / CQI  *(TS 38.214 §5.2)*
+## 16 · `csi.py` — CSI feedback: RI / PMI / CQI  *(TS 38.214 §5.2)*
 
 From the estimated channel the UE selects the **rank (RI)** that maximises
 throughput, the **precoder (PMI)** (SVD proxy for the codebook), and the
@@ -413,7 +800,7 @@ plt.show()
 
 # ---------------------------------------------------------------- scheduler
 md(r"""
-## 10 · `scheduler.py` — MCS scheduling & OLLA  *(TS 38.214)*
+## 17 · `scheduler.py` — MCS scheduling & OLLA  *(TS 38.214)*
 
 MCS selection works in the **SINR domain**:
 
@@ -485,7 +872,7 @@ for o in (-2.0, 0.0, 2.0):
 
 # ---------------------------------------------------------------- receiver
 md(r"""
-## 11 · `receiver.py` — MMSE MIMO equalisation
+## 18 · `receiver.py` — MMSE equalisation, SIC and R-ML
 
 The receiver estimates the channel from DM-RS and applies an **MMSE** equaliser,
 returning per-layer post-equaliser SINRs that feed the LLRs / link abstraction.
@@ -501,10 +888,57 @@ sinr = batch_mmse_sinr(H_eff, noise_var)   # [freq, layers]
 print("per-layer post-MMSE SINR (dB): layer0 = %.1f, layer1 = %.1f (mean over band)"
       % (10*np.log10(sinr[:,0].mean()), 10*np.log10(sinr[:,1].mean())))
 """)
+md(r"""
+Three refinements are used by the codeword-mapping studies:
+
+* `batch_mmse_sinr_est` builds the MMSE filter on a **channel estimate** and
+  evaluates it on the true channel (`estimate_channel_from_dmrs` adds the
+  DM-RS estimation error), so estimation errors cost SINR.
+* `cancelled_sinr` is the MMSE SINR of the remaining layers after decoded
+  layers are **cancelled** (MMSE-SIC). A cancelled layer's estimation error
+  stays behind as interference. `link_abstraction.sic_amc` builds
+  codeword-level SIC on it: per-codeword MCS, and expected bits over all
+  CRC-pass patterns, so failures propagate.
+* `rml_sinr_samples` abstracts an **(R-)ML** detector: per layer, the MMSE-SIC
+  terms of all detection orders, weighted so that the layers' mutual
+  information adds up to log₂det(I + HᴴH/N0), the joint mutual information.
+
+SIC and ML only help when the layers interfere. Per-PRB SVD precoding makes the
+layers orthogonal; a single wideband precoder for the whole band does not.
+""")
+co(r"""
+from nrdlsim.receiver import (batch_mmse_sinr_est, cancelled_sinr, rml_sinr_samples,
+                              estimate_channel_from_dmrs)
+
+def db(x):                                  # band-mean SINR in dB
+    return np.round(10*np.log10(np.mean(x, axis=0)), 1)
+
+# one wideband precoder: the top-2 eigenvectors of the band-averaged H^H H
+_, V = np.linalg.eigh(np.einsum("fri,frj->ij", H.conj(), H))
+H_wb = H @ (V[:, ::-1][:, :2] / np.sqrt(2))          # the layers now interfere
+H_est = estimate_channel_from_dmrs(H_wb, noise_var, np.random.default_rng(1))
+print("wideband precoder, per-layer SINR (dB)")
+print("  MMSE                        :", db(batch_mmse_sinr(H_wb, noise_var)))
+print("  MMSE on the DM-RS estimate  :", db(batch_mmse_sinr_est(H_wb, H_est, noise_var)))
+print("  layer 1 after SIC of layer 0:", db(cancelled_sinr(H_wb, H_wb, noise_var, (0,))[:, 1]))
+
+smp, wts = rml_sinr_samples(H_wb, H_wb, noise_var)
+joint = np.log2(np.real(np.linalg.det(np.eye(2) + H_wb.conj().swapaxes(-1, -2) @ H_wb
+                                      / noise_var)))
+print(f"sum MI per RE (bits): LMMSE "
+      f"{np.log2(1 + batch_mmse_sinr(H_wb, noise_var)).sum(-1).mean():.3f}, "
+      f"R-ML {(np.log2(1 + smp) * wts).sum((-1, -2)).mean():.3f}, "
+      f"log2 det {joint.mean():.3f}")
+
+H_svd = H @ (svd_precoder(H, 2) / np.sqrt(2))       # per-PRB SVD: orthogonal layers
+print("per-PRB SVD, layer-1 SINR with / without SIC of layer 0 (dB):",
+      db(cancelled_sinr(H_svd, H_svd, noise_var, (0,))[:, 1]), "/",
+      db(batch_mmse_sinr(H_svd, noise_var)[:, 1]))
+""")
 
 # ---------------------------------------------------------------- ofdm
 md(r"""
-## 12 · `ofdm.py` — time-domain OFDM waveform  *(TS 38.211 §5.3)*
+## 19 · `ofdm.py` — time-domain OFDM waveform  *(TS 38.211 §5.3)*
 
 The sample-level path: grid → IFFT + cyclic prefix → RF impairments (**CFO**,
 **timing offset**) + multipath → CP removal + FFT. It captures effects the
@@ -538,7 +972,7 @@ plt.show()
 
 # ---------------------------------------------------------------- link simulator
 md(r"""
-## 13 · `link_simulator.py` — full chain & spectral efficiency
+## 20 · `link_simulator.py` — full chain & spectral efficiency
 
 `NRDownlinkSimulator` ties every module together, loops over slots with HARQ and
 link adaptation, and outputs the spectral efficiency.
@@ -608,13 +1042,15 @@ print("serial == parallel results :", ser == par)
 
 # ---------------------------------------------------------------- calibration
 md(r"""
-## 14 · Validation & calibration
+## 21 · Validation & calibration
 
-The simulator is validated at three levels:
+`python -m pytest tests/` runs every test file (about 2 minutes). The
+simulator is validated at several levels:
 
-* **Component self-tests** (`tests/test_modules.py`): constellation energy,
-  noiseless modulation round-trip, TDL/CDL power, BICM monotonicity, genuine
-  LDPC coding gain, dual-pol/UPA power, antenna pattern, OFDM loopback/CP/CFO.
+* **Components** (`tests/test_modules.py`): constellation energy, noiseless
+  modulation round-trip, MCS/TBS, the AWGN MIMO channel, TDL/CDL power,
+  dual-pol UPA, antenna pattern, the OFDM waveform, BICM monotonicity, the
+  code-block TB model and genuine LDPC coding gain.
 * **Link-adaptation regression tests** (`tests/test_link_adaptation.py`) check
   that:
   * the CSI SINR equals the SINR of what is actually transmitted;
@@ -626,6 +1062,18 @@ The simulator is validated at three levels:
   * TBS quantisation follows the spec;
   * MCS table 4 works under link adaptation;
   * HARQ accounting separates first-transmission and residual BLER.
+* **CDL channel** (`tests/test_cdl_pdp.py`, `tests/test_antenna_orientation.py`):
+  the tables against TR 38.901; cluster powers, delay spread, frequency
+  correlation and K-factor of the generated channel (§8); the antenna
+  orientation against the spec's closed-form expressions (§7).
+* **Receivers and multi-TRP** (`tests/test_receivers.py`,
+  `tests/test_multitrp.py`): SIC reduces to MMSE and MRC, estimation errors leave
+  a cancellation residual, the R-ML chain-rule identity, weighted MIESM and SIC
+  error propagation; the TRP stacking and each per-TRP offset (§10, §18).
+* **Study building blocks** (`tests/test_cw2lm.py`,
+  `tests/test_fd_interleaving.py`): TXRU sub-arrays, the handset, layer groups
+  and ideal AMC; the VRB-to-PRB interleavers, segmentation, rate matching and
+  the code-block RE mapping (§12–§13).
 * **Analytical calibration** (`tests/validate_ber.py`): uncoded QAM BER matches
   the closed-form AWGN theory.
 * **3GPP / 5G-IA calibration** (`examples/calibration_5gia.py`,
@@ -640,9 +1088,33 @@ The simulator is validated at three levels:
 | bias-removed spread | 0.64 dB | 0.69 dB |
 """)
 
+# ---------------------------------------------------------------- studies
+md(r"""
+## 22 · Studies built on the simulator
+
+Each script in `examples/` runs one study and writes its figure (and, for most,
+a JSON file) to `results/`. Longer write-ups are in `docs/`, and the
+codeword-mapping comparisons have their own notebook,
+`notebooks/CW2LM_Nokia_Comparison.ipynb`.
+
+| Topic | Script | Output / write-up |
+|---|---|---|
+| SE of channel models and MIMO orders | `compare_configs.py` | `results/compare_se.png` |
+| Calibration against 5G-IA and TS 38.104 | `calibration_5gia.py` | `docs/calibration.md` |
+| CP-OFDM waveform: CFO and timing offset | `waveform_demo.py` | `results/waveform_impairments.png` |
+| CDL geometry; PDP check against TR 38.901 | `plot_cdl_geometry.py`, `verify_cdl_pdp.py` | `results/cdl_antenna_geometry.png`, `results/cdl_pdp_verification.png` |
+| Singular-value distributions (32T8R, delay spread, upper 6 GHz array scaling) | `sv_distribution.py`, `sv_array_scaling.py` | `results/sv_*.png` |
+| Codeword-to-layer mapping: 1/2/4 codewords, 4 and 8 layers, handheld UE, 1024QAM, rank adaptation, OLLA | `codeword_mapping.py <study>` (`--help` lists the studies) | `results/codeword_mapping_*.png`, `results/olla_convergence.png` |
+| Codeword-to-layer mapping vs Nokia R1-2607066, Apple R1-2608231, 2-TRP coherent JT | `cw2lm_nokia.py`, `cw2lm_apple.py`, `cw2lm_mtrp.py` | `docs/cw2lm-nokia.md`, `docs/cw2lm-apple.md`, `docs/cw2lm-mtrp.md` |
+| 4T4R / 32T4R / 128T4R SE, CDL-C and AWGN, 256QAM and 1024QAM tables | `array_size_se.py` (`--mcs-table 4`) | `results/array_size_se*.png` |
+| When does rank 4 beat rank 3? (32T4R, CDL-A, 30 ns) | `rank3_vs_rank4.py` | `results/rank3_vs_rank4_cdla.png` |
+| Frequency-domain (VRB-to-PRB) interleaving | `fd_interleaving.py` | `docs/fd-interleaving.md` |
+| One TB over 400 MHz vs two TBs over 200 MHz (FR2, code-block-aware BLER) | `tb_split_400mhz.py` | `results/tb_split_400mhz.png` |
+""")
+
 # ---------------------------------------------------------------- perf + summary
 md(r"""
-## 15 · Performance & the module map
+## 23 · Performance & the module map
 
 The simulator is vectorised and parallel: batched per-RB linear algebra, a
 disk-cached BICM table, `run(n_jobs=-1)` / `--jobs` for parallel sweeps, and a
@@ -655,15 +1127,17 @@ runs in ~2 s.
 |--------|------|------|
 | `config` | numerology, PDSCH/antenna/channel/HARQ configuration | 38.211 §4 |
 | `mcs_tables`, `tbs` | MCS/CQI tables (incl. illustrative 1024QAM table 4), transport block size | 38.214 §5.1.3 |
-| `resource_grid` | resource grid + DM-RS overhead | 38.211 §7.4.1 |
+| `resource_grid` | DM-RS and data-RE accounting | 38.211 §7.4.1 |
 | `modulation` | QAM mapping + soft LLR demapping | 38.211 §5.1 |
-| `channel_models` | TDL + CDL, dual-pol UPA, element pattern | 38.901 §7.3/7.5/7.7 |
-| `layer_mapping` | codeword→layer mapping + precoding | 38.211 §7.3.1 |
-| `ldpc` | DL-SCH LDPC coding chain | 38.212 §5, §7.2 |
-| `link_abstraction` | BICM capacity, MIESM, LDPC BLER + its target-BLER inverse | — |
+| `channel_models` | TDL; CDL with dual-pol UPA, element pattern, orientation, TXRU sub-arrays and the handset; AWGN MIMO; multi-TRP | 38.901 §7.1.3/7.3/7.5/7.7 |
+| `channel_validation` | PDP, delay-spread, frequency-correlation and K-factor checks of the CDL generator | 38.901 §7.7.1 |
+| `layer_mapping` | codeword→layer mapping, codeword layer groups, precoding | 38.211 §7.3.1 |
+| `ldpc` | CRC, segmentation, rate-matching split, QC-LDPC encode/decode | 38.212 §5, §7.2 |
+| `re_mapping` | code-block RE mapping, VRB-to-PRB interleaving | 38.211 §7.3.1.3, §7.3.1.5–7.3.1.6 |
+| `link_abstraction` | BICM capacity, (weighted) MIESM, LDPC BLER + its target-BLER inverse, code-block TB model, ideal and SIC AMC | — |
 | `csi` | CSI feedback RI/PMI/CQI (power-split, target-BLER CQI) + delay | 38.214 §5.2 |
 | `scheduler` | CQI→SINR→MCS, bidirectional OLLA in dB | 38.214 |
-| `receiver` | DM-RS estimation + MMSE equalisation | — |
+| `receiver` | DM-RS estimation, MMSE (also on an estimate), MMSE-SIC, R-ML abstraction | — |
 | `ofdm` | time-domain CP-OFDM + CFO/timing | 38.211 §5.3 |
 | `link_simulator` | full chain, HARQ (TB kept across retx), SE over allocated BW | — |
 
@@ -672,8 +1146,8 @@ runs in ~2 s.
 python run_simulation.py --model CDL-C --snr -5 30 1 --slots 500 --jobs -1 --plot
 python run_simulation.py --mcs-table 4 --snr 20 45 5 --ideal-csi   # with 1024QAM
 python examples/calibration_5gia.py       # 3GPP / 5G-IA calibration
-python tests/test_modules.py              # component self-tests
-python tests/test_link_adaptation.py      # link-adaptation regression tests
+python examples/codeword_mapping.py --help   # the codeword-mapping studies
+python -m pytest tests/                   # all tests (~2 min)
 ```
 
 The CLI prints `BLER1st` (first-transmission BLER) and `resBLER` (residual BLER
