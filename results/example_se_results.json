@@ -12,153 +12,153 @@
   "points": [
     {
       "snr_db": -5.0,
-      "se": 0.3213464052287582,
-      "throughput_bps": 5899920.0,
-      "bler": 0.13450292397660818,
-      "residual_bler": 0.005847953216374269,
-      "avg_mcs": 2.025,
+      "se": 0.32315468409586057,
+      "throughput_bps": 5933120.0,
+      "bler": 0.14285714285714285,
+      "residual_bler": 0.011904761904761904,
+      "avg_mcs": 2.12,
       "avg_rank": 1.02,
-      "avg_cqi": 3.38
+      "avg_cqi": 3.265
     },
     {
       "snr_db": -2.5,
-      "se": 0.49287581699346406,
-      "throughput_bps": 9049200.0,
-      "bler": 0.13218390804597702,
+      "se": 0.5416949891067538,
+      "throughput_bps": 9945520.0,
+      "bler": 0.13793103448275862,
       "residual_bler": 0.005780346820809248,
-      "avg_mcs": 3.045,
-      "avg_rank": 1.025,
-      "avg_cqi": 4.14
+      "avg_mcs": 3.25,
+      "avg_rank": 1.035,
+      "avg_cqi": 4.15
     },
     {
       "snr_db": 0.0,
-      "se": 0.7604923747276688,
-      "throughput_bps": 13962640.0,
+      "se": 0.7777342047930283,
+      "throughput_bps": 14279200.0,
       "bler": 0.13218390804597702,
       "residual_bler": 0.005747126436781609,
-      "avg_mcs": 4.44,
-      "avg_rank": 1.02,
-      "avg_cqi": 4.965
+      "avg_mcs": 4.54,
+      "avg_rank": 1.025,
+      "avg_cqi": 4.97
     },
     {
       "snr_db": 2.5,
-      "se": 1.0602919389978214,
-      "throughput_bps": 19466960.0,
-      "bler": 0.125,
-      "residual_bler": 0.005681818181818182,
-      "avg_mcs": 4.54,
-      "avg_rank": 1.5,
-      "avg_cqi": 4.89
+      "se": 1.0736688453159042,
+      "throughput_bps": 19712560.0,
+      "bler": 0.13793103448275862,
+      "residual_bler": 0.005747126436781609,
+      "avg_mcs": 5.01,
+      "avg_rank": 1.405,
+      "avg_cqi": 5.12
     },
     {
       "snr_db": 5.0,
-      "se": 1.2350762527233115,
-      "throughput_bps": 22676000.0,
-      "bler": 0.125,
-      "residual_bler": 0.005681818181818182,
-      "avg_mcs": 4.225,
-      "avg_rank": 1.875,
-      "avg_cqi": 4.81
+      "se": 1.27881045751634,
+      "throughput_bps": 23478960.0,
+      "bler": 0.12571428571428572,
+      "residual_bler": 0.005714285714285714,
+      "avg_mcs": 4.365,
+      "avg_rank": 1.865,
+      "avg_cqi": 4.945
     },
     {
       "snr_db": 7.5,
-      "se": 1.932636165577342,
-      "throughput_bps": 35483200.0,
-      "bler": 0.13872832369942195,
+      "se": 1.992326797385621,
+      "throughput_bps": 36579120.0,
+      "bler": 0.14619883040935672,
       "residual_bler": 0.0,
-      "avg_mcs": 5.895,
-      "avg_rank": 1.945,
-      "avg_cqi": 5.79
+      "avg_mcs": 7.25,
+      "avg_rank": 1.78,
+      "avg_cqi": 6.705
     },
     {
       "snr_db": 10.0,
-      "se": 2.376143790849673,
-      "throughput_bps": 43626000.0,
+      "se": 2.379755991285403,
+      "throughput_bps": 43692320.0,
       "bler": 0.15204678362573099,
-      "residual_bler": 0.0,
-      "avg_mcs": 7.15,
+      "residual_bler": 0.005847953216374269,
+      "avg_mcs": 7.305,
       "avg_rank": 2.0,
-      "avg_cqi": 6.73
+      "avg_cqi": 6.93
     },
     {
       "snr_db": 12.5,
-      "se": 3.1234684095860565,
-      "throughput_bps": 57346880.0,
-      "bler": 0.12994350282485875,
+      "se": 3.0605446623093684,
+      "throughput_bps": 56191600.0,
+      "bler": 0.14450867052023122,
       "residual_bler": 0.0,
-      "avg_mcs": 9.285,
+      "avg_mcs": 9.42,
       "avg_rank": 2.0,
-      "avg_cqi": 7.83
+      "avg_cqi": 8.02
     },
     {
       "snr_db": 15.0,
-      "se": 3.815777777777778,
-      "throughput_bps": 70057680.0,
+      "se": 3.804470588235294,
+      "throughput_bps": 69850080.0,
       "bler": 0.13068181818181818,
       "residual_bler": 0.0,
-      "avg_mcs": 11.665,
+      "avg_mcs": 11.705,
       "avg_rank": 2.0,
-      "avg_cqi": 8.965
+      "avg_cqi": 9.16
     },
     {
       "snr_db": 17.5,
-      "se": 4.5082962962962965,
-      "throughput_bps": 82772320.0,
-      "bler": 0.13068181818181818,
+      "se": 4.525433551198257,
+      "throughput_bps": 83086960.0,
+      "bler": 0.13872832369942195,
       "residual_bler": 0.0,
-      "avg_mcs": 13.745,
+      "avg_mcs": 14.09,
       "avg_rank": 2.0,
-      "avg_cqi": 9.8
+      "avg_cqi": 10.06
     },
     {
       "snr_db": 20.0,
-      "se": 5.094265795206971,
-      "throughput_bps": 93530720.0,
-      "bler": 0.15606936416184972,
+      "se": 5.322291938997822,
+      "throughput_bps": 97717280.0,
+      "bler": 0.1569767441860465,
       "residual_bler": 0.0,
-      "avg_mcs": 15.61,
+      "avg_mcs": 16.355,
       "avg_rank": 2.0,
-      "avg_cqi": 11.52
+      "avg_cqi": 12.01
     },
     {
       "snr_db": 22.5,
-      "se": 5.7160392156862745,
-      "throughput_bps": 104946480.0,
-      "bler": 0.15028901734104047,
+      "se": 5.835673202614379,
+      "throughput_bps": 107142960.0,
+      "bler": 0.1511627906976744,
       "residual_bler": 0.0,
-      "avg_mcs": 17.22,
+      "avg_mcs": 17.675,
       "avg_rank": 2.0,
-      "avg_cqi": 12.515
+      "avg_cqi": 12.855
     },
     {
       "snr_db": 25.0,
-      "se": 6.46162962962963,
-      "throughput_bps": 118635520.0,
-      "bler": 0.13793103448275862,
+      "se": 7.010235294117647,
+      "throughput_bps": 128707920.0,
+      "bler": 0.13142857142857142,
       "residual_bler": 0.0,
-      "avg_mcs": 19.045,
+      "avg_mcs": 20.52,
       "avg_rank": 2.0,
-      "avg_cqi": 12.945
+      "avg_cqi": 13.365
     },
     {
       "snr_db": 27.5,
-      "se": 7.758326797385621,
-      "throughput_bps": 142442880.0,
-      "bler": 0.125,
+      "se": 7.931978213507625,
+      "throughput_bps": 145631120.0,
+      "bler": 0.12643678160919541,
       "residual_bler": 0.0,
-      "avg_mcs": 22.435,
+      "avg_mcs": 23.14,
       "avg_rank": 2.0,
-      "avg_cqi": 14.15
+      "avg_cqi": 14.39
     },
     {
       "snr_db": 30.0,
-      "se": 8.219808278867102,
-      "throughput_bps": 150915680.0,
-      "bler": 0.12643678160919541,
+      "se": 8.561137254901961,
+      "throughput_bps": 157182480.0,
+      "bler": 0.125,
       "residual_bler": 0.0,
-      "avg_mcs": 23.815,
+      "avg_mcs": 24.395,
       "avg_rank": 2.0,
-      "avg_cqi": 14.635
+      "avg_cqi": 14.68
     }
   ]
 }

@@ -789,9 +789,6 @@ for s in (0, 5, 10, 15, 20, 25, 30):
     print(f"{s:3d} dB | {np.log2(1 + 10 ** (s / 10)):5.2f}   | "
           f"{all_names[q_pick]} ({caps[q_pick]:.2f} bits per symbol)")
 """)
-    nb.md(r"""
-*Small print.* `bicm_capacity` is the curve the simulator itself uses. It was computed with the receiver's simplified ("max-log") demapper and a modest random sample, so it differs a little from the exact BICM capacity: by up to about 0.1 bit per symbol where each constellation is normally used, and by up to 0.3 bit per symbol for the large constellations at low SNR, where nobody would use them. The small sample is also why the curves wiggle a little. None of the lessons here depend on that.
-""")
 
     nb.md(r"""
 ## 5 · From bits per symbol to bit/s/Hz
@@ -843,7 +840,7 @@ print(f"between 5 and 25 dB the simulator reaches {reached.min():.0%} to "
 - **Shannon's line** (black) is the absolute limit.
 - **The best constellation with an ideal code** (green) follows it a little below, and stops at 8 bits: the MCS table used here goes up to 256QAM.
 - **Only part of the time and frequency carries data** (orange). Reference signals for measuring the channel, a control region, and a short guard interval in every symbol (the *cyclic prefix*, which absorbs echoes) take the rest (notebook 6).
-- **The simulator** (blue dots) reaches only two thirds to four fifths of the orange curve (printed above). Real LDPC codes need 1–2 dB more SNR than the limit (notebook 3); the system aims at about 10 % block errors and retransmits them; and it can only choose among 28 settings (notebook 4).
+- **The simulator** (blue dots) reaches only a little over half to about four fifths of the orange curve (printed above). Real LDPC codes need 1–2 dB more SNR than the limit (notebook 3); the system aims at about 10 % block errors and retransmits them; and it can only choose among 28 settings (notebook 4).
 
 With several antennas, as in notebook 0, the curve can rise above Shannon's line. That is no contradiction: the SNR is measured at one antenna, and the antennas add gain and a second stream on top (notebook 7).
 """)

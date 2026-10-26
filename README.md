@@ -201,11 +201,11 @@ python examples/verify_cdl_pdp.py
 
 ```
  SNR[dB]   SE[b/s/Hz]   Tput[Mbps]  BLER1st  resBLER   avgMCS  avgRank   avgCQI
-   -5.00       0.3213        5.900    0.135    0.006     2.02     1.02     3.38
-    0.00       0.7605       13.963    0.132    0.006     4.44     1.02     4.96
-   10.00       2.3761       43.626    0.152    0.000     7.15     2.00     6.73
-   20.00       5.0943       93.531    0.156    0.000    15.61     2.00    11.52
-   30.00       8.2198      150.916    0.126    0.000    23.82     2.00    14.63
+   -5.00       0.3232        5.933    0.143    0.012     2.12     1.02     3.27
+    0.00       0.7777       14.279    0.132    0.006     4.54     1.02     4.97
+   10.00       2.3798       43.692    0.152    0.006     7.30     2.00     6.93
+   20.00       5.3223       97.717    0.157    0.000    16.36     2.00    12.01
+   30.00       8.5611      157.182    0.125    0.000    24.39     2.00    14.68
 ```
 
 Observed behaviour (all physically consistent):
@@ -276,9 +276,9 @@ throughput, 3GPP RAN4 FR1/FDD) against **two independent published references**:
 the **5G-IA link-level calibration** (ideal, 8-company average) and the **3GPP
 TS 38.104** PUSCH minimum performance requirements (FRCs G-FR1-A3/A4/A5, which
 map exactly onto MCS 2/16/20). The simulator tracks case-to-case behaviour to
-within **~0.65 dB** (bias-removed) across QPSK/16QAM/64QAM, TDL-A/B/C, SIMO and
-2×2 MIMO, and two bandwidths — sitting ~1.3 dB below the ideal calibration
-(MIESM coding-gap optimism) and ~3.4 dB below the conformance requirement (that
+within **~0.6 dB** (bias-removed) across QPSK/16QAM/64QAM, TDL-A/B/C, SIMO and
+2×2 MIMO, and two bandwidths — sitting ~1.4 dB below the ideal calibration
+(MIESM coding-gap optimism) and ~3.5 dB below the conformance requirement (that
 gap = coding-gap optimism + the ~2 dB implementation margin the requirement
 builds in, exactly as an ideal simulator should). See
 [`docs/calibration.md`](docs/calibration.md) for the full table and analysis.
