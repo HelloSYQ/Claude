@@ -38,6 +38,10 @@ simulator.
 The notebook is stored without outputs. Run all cells (about 3 minutes) to see
 the plots.
 
+**New to wireless?** Start with the beginner series in
+[`notebooks/learn/`](learn/README.md), which explains the ideas behind these
+modules from scratch.
+
 | Spec | Covers |
 |------|--------|
 | **TS 38.211** | numerology, DM-RS, modulation, layer mapping, RE and VRB-to-PRB mapping |

@@ -82,6 +82,14 @@ simulator offers two paths, selected by `fec_mode`:
 
 ## Guided tour (Jupyter notebook)
 
+**New to wireless?** Start with
+**[`notebooks/learn/`](notebooks/learn/README.md)**, *NR link-level simulation
+from zero*: short notebooks that explain the simulator from the ground up,
+assuming Python but no wireless background (notebooks 0–2 so far: what a
+link-level simulator does; bits, symbols and noise; constellations and
+Shannon's limit). They can be read on GitHub with their plots, or opened in
+Colab.
+
 For a comprehensive, runnable walkthrough of **every module** — with a live demo
 and plot for each (constellations, channel PDP/frequency response, CDL angular
 map and antenna pattern, BICM capacity, OFDM CFO/timing, a full SE curve, and
@@ -94,8 +102,10 @@ A second notebook,
 explains the modules and results of the codeword-to-layer mapping comparison
 with Nokia R1-2607066 (regenerate with `python notebooks/build_cw2lm_nokia.py`).
 
-The notebooks are stored without outputs: their plots made them several MB and
-every re-run rewrote them. GitHub shows their text and code. To see the plots,
+These two notebooks are stored without outputs: their plots made them several MB and
+every re-run rewrote them. GitHub shows their text and code. (The beginner
+notebooks in `notebooks/learn/` keep their outputs, so a newcomer can read them
+without running anything; see their README.) To see the plots,
 run them in Jupyter, or render executed copies to HTML (`notebooks/*.html` is
 git-ignored):
 
@@ -106,8 +116,9 @@ jupyter nbconvert --to html --execute notebooks/CW2LM_Nokia_Comparison.ipynb
 #                               python notebooks/build_cw2lm_nokia.py
 ```
 
-Clear the outputs before committing a notebook
-(`jupyter nbconvert --clear-output --inplace notebooks/*.ipynb`).
+Clear the outputs before committing one of these two notebooks
+(`jupyter nbconvert --clear-output --inplace notebooks/*.ipynb`; the pattern
+does not reach `notebooks/learn/`).
 
 ## Installation
 

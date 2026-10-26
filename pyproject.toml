@@ -15,6 +15,8 @@ dependencies = ["numpy>=1.24"]
 examples = ["scipy>=1.10", "matplotlib>=3.6"]
 # test suite: python -m pytest tests/
 test = ["pytest>=7", "scipy>=1.10", "matplotlib>=3.6"]
+# regenerate the notebooks: notebooks/build_*.py, notebooks/learn/build_learn.py --execute
+notebooks = ["matplotlib>=3.6", "nbformat>=5.1", "nbclient>=0.7", "ipykernel>=6"]
 
 [tool.setuptools]
 packages = ["nrdlsim"]
