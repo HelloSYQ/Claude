@@ -298,8 +298,8 @@ The older test files also run on their own (`python tests/test_modules.py`).
 
 `test_modules.py` validates constellation energy, noiseless modulation
 round-trip, MCS/TBS, TDL fading power normalisation, the AWGN MIMO channel,
-monotone BICM capacity, the code-block-aware TB error model, and genuine LDPC
-coding gain.
+the BICM capacity (monotone, and QPSK equal to twice the BPSK capacity), the
+code-block-aware TB error model, and genuine LDPC coding gain.
 
 `test_link_adaptation.py` holds regression tests for the link-adaptation path.
 They check that:

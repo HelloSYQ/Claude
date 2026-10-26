@@ -19,24 +19,63 @@ efficiency curves; a bit-true LDPC path is available separately in ``ldpc.py``.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import numpy as np
 from functools import lru_cache
 
-from .modulation import _build_constellation
+from .modulation import _NORM, _pam_levels
 
 _CACHE_DIR = os.path.join(os.path.dirname(__file__), "_cache")
 
 
-@lru_cache(maxsize=None)
-def _bicm_table(qm: int, n_snr: int = 121):
-    """BICM capacity (bits/symbol) vs SNR (dB) for a modulation.
+def _pam_bicm_loss(levels: np.ndarray, sigma: float) -> float:
+    """Sum over the bits of 1 - I(bit; y), in bits, for equiprobable PAM
+    ``levels`` (index = bit label, MSB first) in real Gaussian noise of
+    standard deviation ``sigma``.
 
-    The Monte-Carlo build is ~1 s per modulation; the result is deterministic
-    (fixed seed) so it is cached both in-process (lru_cache) and on disk, making
-    repeat process invocations start instantly.
+    A bit's loss is E[log2(1 + exp(-(1-2c) LLR))] with the exact
+    (log-sum-exp) LLR, c being the bit sent.  The expectation over the sent
+    level and the noise is integrated over the received amplitude y by the
+    trapezoid rule, in steps of sigma/8 out to 12 sigma beyond the outer
+    levels.  The integrand is smooth with Gaussian tails, so the rule
+    converges spectrally: the result is exact to ~1e-12.
     """
-    cache_file = os.path.join(_CACHE_DIR, f"bicm_qm{qm}_{n_snr}.npz")
+    n = levels.size
+    m = int(np.log2(n))
+    labels = (np.arange(n)[:, None] >> np.arange(m - 1, -1, -1)) & 1
+    h = sigma / 8
+    y = np.arange(levels.min() - 12 * sigma, levels.max() + 12 * sigma, h)
+    metric = -(y[:, None] - levels[None, :]) ** 2 / (2 * sigma ** 2)
+    # trapezoid weight of each (y, sent level): p(y | level) dy / n
+    w = np.exp(metric) * h / (np.sqrt(2 * np.pi) * sigma * n)
+    loss = 0.0
+    for b in range(m):
+        one = labels[:, b] == 1
+        llr = (np.logaddexp.reduce(metric[:, ~one], axis=1)
+               - np.logaddexp.reduce(metric[:, one], axis=1))
+        loss += (w[:, ~one].sum(axis=1) @ np.logaddexp(0, -llr)
+                 + w[:, one].sum(axis=1) @ np.logaddexp(0, llr))
+    return loss / np.log(2)
+
+
+@lru_cache(maxsize=None)
+def _bicm_table(qm: int, n_snr: int = 601):
+    """Exact BICM capacity (bits/symbol) vs SNR (dB) for a modulation.
+
+    The square QAM of TS 38.211 sends its even-numbered bits on the in-phase
+    and its odd-numbered bits on the quadrature PAM level, so the bit
+    likelihoods factor and the capacity is twice that of one PAM axis in real
+    noise of variance N0/2 (unit symbol energy).  The 0.1 dB grid keeps the
+    interpolation within 1e-4 bit of the exact curve.  Building the tables of
+    all modulations takes ~3 s, so they are cached both in-process
+    (lru_cache) and on disk; the file name carries a digest of the PAM levels,
+    so a changed constellation never reuses a stale table.
+    """
+    m = qm // 2
+    pam = _pam_levels(m) * _NORM[qm]              # level of each m-bit label
+    digest = hashlib.sha1(pam.tobytes()).hexdigest()[:8]
+    cache_file = os.path.join(_CACHE_DIR, f"bicm_exact_qm{qm}_{n_snr}_{digest}.npz")
     if os.path.exists(cache_file):
         try:
             d = np.load(cache_file)
@@ -44,35 +83,8 @@ def _bicm_table(qm: int, n_snr: int = 121):
         except Exception:
             pass
     snr_db = np.linspace(-20, 40, n_snr)
-    const = _build_constellation(qm)
-    labels = np.array([[(s >> (qm - 1 - i)) & 1 for i in range(qm)]
-                       for s in range(2 ** qm)])
-    rng = np.random.default_rng(12345)
-    n_mc = 2000
-    cap = np.zeros(n_snr)
-    for si, sdb in enumerate(snr_db):
-        snr = 10 ** (sdb / 10.0)
-        noise = np.sqrt(1.0 / (2 * snr))
-        idx = rng.integers(0, 2 ** qm, size=n_mc)
-        x = const[idx]
-        n = noise * (rng.standard_normal(n_mc) + 1j * rng.standard_normal(n_mc))
-        y = x + n
-        d2 = np.abs(y[:, None] - const[None, :]) ** 2
-        metric = -d2 / (2 * noise ** 2)
-        total = 0.0
-        for b in range(qm):
-            mask0 = labels[:, b] == 0
-            m0 = metric[:, mask0]
-            m1 = metric[:, ~mask0]
-            # per-bit mutual information via LLR
-            max0 = m0.max(axis=1)
-            max1 = m1.max(axis=1)
-            llr = max0 - max1
-            sent = labels[idx, b]
-            # I(bit) = 1 - E[log2(1+exp(-(1-2c)*llr))]
-            s = 1 - 2 * sent
-            total += 1 - np.mean(np.log2(1 + np.exp(-s * llr)))
-        cap[si] = total
+    sigma = np.sqrt(1.0 / (2 * 10 ** (snr_db / 10.0)))   # noise std per real dimension
+    cap = np.array([qm - 2 * _pam_bicm_loss(pam, s) for s in sigma])
     try:
         os.makedirs(_CACHE_DIR, exist_ok=True)
         np.savez(cache_file, snr_db=snr_db, cap=cap)
@@ -82,7 +94,11 @@ def _bicm_table(qm: int, n_snr: int = 121):
 
 
 def bicm_capacity(snr_db, qm: int) -> np.ndarray:
-    """BICM capacity in bits/symbol for given SNR(dB) and modulation order."""
+    """BICM capacity in bits/symbol for given SNR(dB) and modulation order.
+
+    Exact to ~1e-4 bit between -20 and 40 dB, and held at the end values
+    outside that range.
+    """
     grid_db, cap = _bicm_table(qm)
     return np.interp(snr_db, grid_db, cap)
 

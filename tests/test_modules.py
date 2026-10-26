@@ -217,12 +217,31 @@ def test_ofdm_waveform():
 
 
 def test_bicm_capacity_monotonic():
-    snr = np.linspace(-10, 30, 20)
-    for qm in (2, 4, 6, 8):
+    snr = np.linspace(-20, 40, 1201)
+    for qm in (2, 4, 6, 8, 10):
         cap = bicm_capacity(snr, qm)
-        assert np.all(np.diff(cap) >= -1e-3), qm
-        assert cap[-1] > qm * 0.8
+        assert np.all(np.diff(cap) >= 0), qm
+        assert cap[-1] > qm - 1e-3
     print("BICM capacity monotonic + saturating: OK")
+
+
+def test_bicm_capacity_reference():
+    """The exact BICM capacity against references computed independently."""
+    from scipy.integrate import quad
+
+    def bpsk(snr_db):
+        # binary-input AWGN: 1 - E[log2(1 + exp(-2y / s2))], y ~ N(1, s2)
+        s2 = 10 ** (-snr_db / 10)
+        f = lambda n: (np.exp(-n * n / (2 * s2)) / np.sqrt(2 * np.pi * s2)
+                       * np.logaddexp(0, -2 * (1 + n) / s2) / np.log(2))
+        sd = np.sqrt(s2)
+        return 1 - quad(f, -40 * sd, 40 * sd, points=[-1.0], limit=200)[0]
+
+    # QPSK is one BPSK per axis, each at the symbol SNR
+    assert abs(bpsk(0) - 0.486) < 1e-3
+    for snr_db in (-10, -5, 0, 5, 10):
+        assert abs(bicm_capacity(snr_db, 2) - 2 * bpsk(snr_db)) < 1e-5, snr_db
+    print("BICM capacity vs references: OK")
 
 
 def test_ldpc_corrects_errors():
@@ -268,5 +287,6 @@ if __name__ == "__main__":
     test_antenna_gain_shaping()
     test_ofdm_waveform()
     test_bicm_capacity_monotonic()
+    test_bicm_capacity_reference()
     test_ldpc_corrects_errors()
     print("\nAll module self-tests passed.")

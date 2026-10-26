@@ -1053,8 +1053,9 @@ simulator is validated at several levels:
 
 * **Components** (`tests/test_modules.py`): constellation energy, noiseless
   modulation round-trip, MCS/TBS, the AWGN MIMO channel, TDL/CDL power,
-  dual-pol UPA, antenna pattern, the OFDM waveform, BICM monotonicity, the
-  code-block TB model and genuine LDPC coding gain.
+  dual-pol UPA, antenna pattern, the OFDM waveform, the BICM capacity
+  (monotone, and QPSK equal to twice the BPSK capacity), the code-block TB
+  model and genuine LDPC coding gain.
 * **Link-adaptation regression tests** (`tests/test_link_adaptation.py`) check
   that:
   * the CSI SINR equals the SINR of what is actually transmitted;
