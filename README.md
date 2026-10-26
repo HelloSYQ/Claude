@@ -269,6 +269,17 @@ TB BLER = 1 − Π(1 − BLER_cb)) lives in `nrdlsim/ldpc.py`,
 `nrdlsim/re_mapping.py` and `nrdlsim/link_abstraction.py`. The main
 simulator (`NRDownlinkSimulator`) still uses the single-waveform TB model.
 
+The link abstraction now uses the exact BICM capacity, and 64QAM and up the
+TS 38.211 (Gray) bit labels. The calibration, the example output above,
+`array_size_se*.png` and `codeword_mapping_study.png` were regenerated after
+these two changes; the other link-abstraction studies' outputs, and the numbers
+quoted in their write-ups, predate them. In the regenerated studies the SE moved
+by −2 % to +11 % (+2 to +4 % on average), mostly from the labels at the SNRs
+where 64QAM and up are used. Comparisons within a study moved less: the
+4-codeword gain of `codeword_mapping.py study` by at most 2 percentage points.
+A rerun of `fd_interleaving.py` (32 PRB) raises the SE by up to 7 % and leaves
+the interleaving gains negligible (at most 0.04 % of SE, against 0.05 %).
+
 ## Calibration against 3GPP / 5G-IA
 
 `examples/calibration_5gia.py` cross-checks the simulator (SNR at 70 %
