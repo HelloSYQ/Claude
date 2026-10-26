@@ -264,6 +264,12 @@ def test_bicm_capacity_reference():
     assert abs(bpsk(0) - 0.486) < 1e-3
     for snr_db in (-10, -5, 0, 5, 10):
         assert abs(bicm_capacity(snr_db, 2) - 2 * bpsk(snr_db)) < 1e-5, snr_db
+    # one point per constellation from an independent Monte-Carlo run over
+    # the complex constellation with exact LLRs: 4e6 symbols (4e7 for QPSK),
+    # standard error <= 8e-4 bit
+    for qm, snr_db, ref in ((2, 0, 0.97185), (4, 10, 3.16363), (6, 15, 4.67793),
+                            (8, 20, 6.24406), (10, 25, 7.83518)):
+        assert abs(bicm_capacity(snr_db, qm) - ref) < 3e-3, qm
     print("BICM capacity vs references: OK")
 
 

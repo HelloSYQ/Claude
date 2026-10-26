@@ -298,9 +298,10 @@ The older test files also run on their own (`python tests/test_modules.py`).
 
 `test_modules.py` validates constellation energy and the TS 38.211 (Gray)
 bit mapping, noiseless modulation round-trip, MCS/TBS, TDL fading power
-normalisation, the AWGN MIMO channel, the BICM capacity (monotone, and QPSK
-equal to twice the BPSK capacity), the code-block-aware TB error model, and
-genuine LDPC coding gain.
+normalisation, the AWGN MIMO channel, the BICM capacity (monotone, QPSK equal
+to twice the BPSK capacity, and a point per constellation from an independent
+Monte-Carlo run), the code-block-aware TB error model, and genuine LDPC coding
+gain.
 
 `test_link_adaptation.py` holds regression tests for the link-adaptation path.
 They check that:
