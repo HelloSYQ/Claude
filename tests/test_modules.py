@@ -18,6 +18,29 @@ def test_constellation_unit_energy():
     print("constellation unit-energy: OK")
 
 
+def test_constellation_ts38211():
+    """TS 38.211 5.1.3-5.1.7 mappings, which are Gray: nearest neighbours
+    differ in one bit."""
+    axis = {2: lambda s: s[0],
+            4: lambda s: s[0] * (2 - s[1]),
+            6: lambda s: s[0] * (4 - s[1] * (2 - s[2])),
+            8: lambda s: s[0] * (8 - s[1] * (4 - s[2] * (2 - s[3]))),
+            10: lambda s: s[0] * (16 - s[1] * (8 - s[2] * (4 - s[3] * (2 - s[4]))))}
+    power = {2: 2, 4: 10, 6: 42, 8: 170, 10: 682}
+    for qm in (2, 4, 6, 8, 10):
+        c = _build_constellation(qm)
+        for sym in range(2 ** qm):
+            s = [1 - 2 * ((sym >> (qm - 1 - i)) & 1) for i in range(qm)]
+            ref = (axis[qm](s[0::2]) + 1j * axis[qm](s[1::2])) / np.sqrt(power[qm])
+            assert abs(c[sym] - ref) < 1e-12, (qm, sym)
+        d = np.abs(c[:, None] - c[None, :])
+        near = np.isclose(d, d[d > 0].min())
+        x = np.arange(2 ** qm)[:, None] ^ np.arange(2 ** qm)[None, :]
+        flips = sum((x >> k) & 1 for k in range(qm))
+        assert np.all(flips[near] == 1), qm
+    print("constellations follow TS 38.211 (Gray): OK")
+
+
 def test_modulation_roundtrip_no_noise():
     for qm in (2, 4, 6, 8):
         mod = Modulator(qm)
@@ -277,6 +300,7 @@ def test_ldpc_corrects_errors():
 
 if __name__ == "__main__":
     test_constellation_unit_energy()
+    test_constellation_ts38211()
     test_modulation_roundtrip_no_noise()
     test_mcs_and_tbs()
     test_awgn_mimo_channel()

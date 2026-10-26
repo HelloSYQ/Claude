@@ -42,17 +42,19 @@ def _bits_to_index(bits) -> int:
 
 
 def _pam_levels(m: int) -> np.ndarray:
-    """Gray-coded PAM amplitude for each m-bit label (NR sign convention).
+    """PAM amplitude of each m-bit label (MSB first), as in TS 38.211 5.1.
 
-    NR maps bit 0 -> +amplitude.  Amplitudes are the odd integers
-    {..., -3, -1, +1, +3, ...} arranged by Gray code.
+    The spec's nested form, e.g. (1-2b0)[4 - (1-2b1)[2 - (1-2b2)]] for one
+    64QAM axis, maps bit 0 to positive amplitudes and is Gray: neighbouring
+    amplitudes, the odd integers {..., -3, -1, +1, +3, ...}, differ in one bit.
     """
-    n = 2 ** m
-    amps = np.zeros(n)
-    for label in range(n):
-        gray = label ^ (label >> 1)
-        level = 2 * gray - (n - 1)         # spread to +/- (n-1)
-        amps[label] = -level               # NR: bit 0 -> positive
+    amps = np.zeros(2 ** m)
+    for label in range(2 ** m):
+        s = [1 - 2 * ((label >> (m - 1 - i)) & 1) for i in range(m)]
+        amp = s[-1]
+        for i in range(m - 2, -1, -1):
+            amp = s[i] * (2 ** (m - 1 - i) - amp)
+        amps[label] = amp
     return amps
 
 
